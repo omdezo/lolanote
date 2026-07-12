@@ -1,0 +1,66 @@
+{
+  "realm": "qomranote",
+  "enabled": true,
+  "displayName": "QomraNote",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "bruteForceProtected": true,
+  "sslRequired": "external",
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "clients": [
+    {
+      "clientId": "qomranote-web",
+      "name": "QomraNote Web App",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": ["http://localhost:5173", "http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:3000/*"
+      }
+    },
+    {
+      "clientId": "qomranote-api",
+      "name": "QomraNote API (service account)",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "qomranote-api-secret-change-me",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "enabled": true,
+      "email": "demo@qomranote.local",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Creator",
+      "credentials": [
+        { "type": "password", "value": "demo1234", "temporary": false }
+      ]
+    },
+    {
+      "username": "service-account-qomranote-api",
+      "enabled": true,
+      "serviceAccountClientId": "qomranote-api",
+      "clientRoles": {
+        "realm-management": ["view-users", "query-users"]
+      }
+    }
+  ]
+}

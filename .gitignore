@@ -1,0 +1,15 @@
+# env & secrets
+.env
+
+# Go
+backend/bin/
+backend/data/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
