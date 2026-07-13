@@ -105,6 +105,9 @@ type Principal struct {
 	Email      string
 	Name       string
 	ShareToken string // optional X-Share-Token accompanying the request
+	// ExpiresAt is the verified token's expiry. Long-lived sessions built on
+	// one verification (WebSockets) must not outlive the credential.
+	ExpiresAt time.Time
 }
 
 // BreadcrumbEntry is one hop in the Home → … → current-board path (§3.2).

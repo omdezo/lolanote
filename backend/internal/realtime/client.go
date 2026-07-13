@@ -15,6 +15,13 @@ const (
 	pongWait       = 60 * time.Second
 	pingPeriod     = 45 * time.Second
 	maxMessageSize = 1 << 20 // element payloads can carry rich-text docs
+
+	// A connection authorized once must not outlive its credential: the
+	// socket closes at the verified token's expiry (clamped below) and the
+	// client reconnects with a fresh ticket, re-running the access check.
+	minAuthLifetime     = 30 * time.Second
+	maxAuthLifetime     = 30 * time.Minute
+	defaultAuthLifetime = 15 * time.Minute
 )
 
 // Client is one WebSocket connection scoped to one board room.
@@ -31,6 +38,8 @@ type Client struct {
 	send chan []byte
 	once sync.Once
 
+	authTimer *time.Timer
+
 	mu      sync.Mutex
 	cursor  *Cursor
 	editing string
@@ -43,6 +52,28 @@ func NewClient(hub *Hub, conn *websocket.Conn, id, boardID string, p *domain.Pri
 		hub: hub, conn: conn, send: make(chan []byte, 64),
 	}
 	hub.Register(c)
+
+	// End the session when the credential ends (JWT exp), clamped so a
+	// misconfigured realm can neither churn reconnects nor grant immortality.
+	lifetime := defaultAuthLifetime
+	if !p.ExpiresAt.IsZero() {
+		lifetime = time.Until(p.ExpiresAt)
+	}
+	if lifetime < minAuthLifetime {
+		lifetime = minAuthLifetime
+	}
+	if lifetime > maxAuthLifetime {
+		lifetime = maxAuthLifetime
+	}
+	c.authTimer = time.AfterFunc(lifetime, func() {
+		// 4401 tells the client this is a credential rollover, not an error;
+		// its reconnect path fetches a fresh ticket and refetches the board.
+		_ = c.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4401, "credential expired"), time.Now().Add(writeWait))
+		c.close()
+		_ = c.conn.Close()
+	})
+
 	go c.writePump()
 	go c.readPump()
 	return c
@@ -69,6 +100,9 @@ func (c *Client) Send(msg []byte) {
 
 func (c *Client) close() {
 	c.once.Do(func() {
+		if c.authTimer != nil {
+			c.authTimer.Stop()
+		}
 		c.hub.Unregister(c)
 		close(c.send)
 	})

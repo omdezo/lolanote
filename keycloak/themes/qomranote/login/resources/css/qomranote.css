@@ -1,0 +1,179 @@
+/* ============================================================
+   QomraNote login — same design system as the app:
+   SF-first type stack · hairline borders · Apple-indigo accent ·
+   calm neutral canvas with the dot grid · dark mode via
+   prefers-color-scheme.
+   ============================================================ */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --canvas: #f5f5f7;
+  --canvas-dot: rgba(60, 60, 67, 0.14);
+  --surface: #ffffff;
+  --ink: #1d1d1f;
+  --ink-2: #48484d;
+  --ink-3: #86868b;
+  --hairline: rgba(60, 60, 67, 0.12);
+  --hairline-strong: rgba(60, 60, 67, 0.2);
+  --accent: #5e5ce6;
+  --accent-deep: #4a48c4;
+  --accent-tint: rgba(94, 92, 230, 0.1);
+  --danger: #ff3b30;
+  --danger-tint: rgba(255, 59, 48, 0.08);
+  --ok: #34c759;
+  --shadow-pop: 0 0 0 1px var(--hairline), 0 8px 20px rgba(0,0,0,0.08), 0 24px 60px rgba(0,0,0,0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #1c1c1e;
+    --canvas-dot: rgba(255, 255, 255, 0.10);
+    --surface: #2c2c2e;
+    --ink: #f5f5f7;
+    --ink-2: #c9c9ce;
+    --ink-3: #8e8e93;
+    --hairline: rgba(255, 255, 255, 0.10);
+    --hairline-strong: rgba(255, 255, 255, 0.20);
+    --danger: #ff6b61;
+    --shadow-pop: 0 0 0 1px var(--hairline), 0 8px 20px rgba(0,0,0,0.44), 0 24px 60px rgba(0,0,0,0.55);
+  }
+}
+
+* { box-sizing: border-box; }
+html.qn-html, body.qn-body { height: 100%; margin: 0; }
+body.qn-body {
+  font-family: var(--font);
+  color: var(--ink);
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 26px 26px;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.qn-login { width: 100%; max-width: 396px; }
+
+/* ---- brand header (realm displayNameHtml) ---- */
+.qn-header { margin-bottom: 22px; }
+.qn-header-wrap { display: flex; justify-content: center; }
+.qn-brand { display: flex; align-items: center; gap: 11px; user-select: none; }
+.qn-brand-mark {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: linear-gradient(135deg, #6e6cf0, #4a48c4);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-family: Georgia, 'Times New Roman', serif; font-size: 26px; font-weight: 700;
+  box-shadow: 0 6px 18px rgba(94, 92, 230, 0.38);
+}
+.qn-brand-name { font-size: 23px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.qn-brand-name em { font-style: normal; color: var(--accent); }
+
+/* ---- card ---- */
+.qn-card {
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: var(--shadow-pop);
+  padding: 26px 28px 24px;
+}
+#kc-page-title {
+  margin: 0 0 18px;
+  font-size: 17px; font-weight: 700; letter-spacing: -0.015em;
+  text-align: center; color: var(--ink);
+}
+
+/* ---- form ---- */
+.qn-group { margin-bottom: 14px; }
+.qn-label {
+  display: block; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  margin-bottom: 6px; letter-spacing: 0.01em;
+}
+.qn-input, input.qn-input {
+  width: 100%; font-family: inherit; font-size: 14.5px; color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong); border-radius: 10px;
+  padding: 11px 13px; outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.qn-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3.5px var(--accent-tint); }
+.qn-input[aria-invalid="true"] { border-color: var(--danger); }
+.qn-input::placeholder { color: var(--ink-3); }
+.qn-input-error { display: block; color: var(--danger); font-size: 12px; margin-top: 6px; }
+
+/* password reveal (input group) */
+.qn-input-group { position: relative; display: flex; }
+.qn-input-group .qn-input { flex: 1; }
+.qn-input-group button {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--ink-3);
+  padding: 6px; border-radius: 7px; display: flex; align-items: center;
+}
+.qn-input-group button:hover { color: var(--ink); background: var(--accent-tint); }
+
+/* options row: remember me + forgot password */
+.qn-options-wrap {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 0 16px; font-size: 12.5px;
+}
+.qn-options .checkbox { margin: 0; }
+.qn-options label { display: flex; align-items: center; gap: 7px; color: var(--ink-2); cursor: pointer; }
+.qn-checkbox, .qn-options input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;
+}
+
+/* ---- buttons ---- */
+.qn-buttons { margin-top: 6px; }
+.qn-btn {
+  font-family: inherit; font-size: 14.5px; font-weight: 600;
+  border: none; border-radius: 10px; cursor: pointer;
+  padding: 12px 16px; transition: background 0.15s ease, transform 0.1s ease;
+}
+.qn-btn:active { transform: scale(0.985); }
+.qn-btn-block { width: 100%; display: block; }
+.qn-btn-primary {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 2px 8px rgba(94, 92, 230, 0.35);
+}
+.qn-btn-primary:hover { background: var(--accent-deep); }
+.qn-btn-default { background: var(--accent-tint); color: var(--accent); }
+.qn-btn-default:hover { background: var(--accent); color: #fff; }
+
+/* ---- links (forgot password, register, back to login) ---- */
+a { color: var(--accent); text-decoration: none; font-weight: 600; }
+a:hover { color: var(--accent-deep); text-decoration: underline; }
+
+.qn-info, #kc-registration {
+  text-align: center; font-size: 13px; color: var(--ink-3); margin-top: 16px;
+}
+#kc-registration span { color: var(--ink-3); }
+
+/* ---- alerts (bad credentials, email sent, …) ---- */
+.qn-alert {
+  display: flex; align-items: center; gap: 8px;
+  border-radius: 10px; padding: 10px 13px; margin-bottom: 14px;
+  font-size: 13px; font-weight: 500;
+}
+.alert-error.qn-alert { background: var(--danger-tint); color: var(--danger); }
+.alert-success.qn-alert { background: rgba(52, 199, 89, 0.12); color: var(--ok); }
+.alert-warning.qn-alert { background: rgba(242, 162, 13, 0.14); color: #b07908; }
+.alert-info.qn-alert { background: var(--accent-tint); color: var(--accent); }
+.qn-alert .pficon, .qn-alert .kc-feedback-text { display: inline; }
+
+/* ---- locale picker / misc chrome the base theme renders ---- */
+#kc-locale { text-align: right; font-size: 12px; margin-bottom: 8px; }
+#kc-attempted-username { font-size: 13px; color: var(--ink-2); }
+#kc-username { text-align: center; margin-bottom: 10px; }
+.subtitle { color: var(--ink-3); font-size: 12px; }
+
+/* required-action & info pages inherit the card automatically */
+#kc-info { font-size: 13px; color: var(--ink-2); }
+#kc-info-message { text-align: center; }
+
+/* Try-another-way / social providers (unused today, styled for safety) */
+#kc-social-providers ul { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+#kc-social-providers a {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--hairline-strong); border-radius: 10px; padding: 10px;
+  color: var(--ink); font-weight: 600;
+}
+#kc-social-providers a:hover { border-color: var(--accent); text-decoration: none; }

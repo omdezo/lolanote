@@ -17,6 +17,10 @@ import (
 // Verifier validates Keycloak-issued JWTs against the realm's JWKS.
 type Verifier struct {
 	verifier *oidc.IDTokenVerifier
+	// allowedAzp pins tokens to the browser client: a JWT minted for any
+	// OTHER client in the realm (service accounts, future clients) is not a
+	// valid credential for this API. Empty disables the check.
+	allowedAzp string
 }
 
 // NewVerifier discovers the realm configuration. In docker split-horizon
@@ -32,9 +36,11 @@ func NewVerifier(ctx context.Context, cfg *config.Config) (*Verifier, error) {
 		return nil, fmt.Errorf("oidc discovery: %w", err)
 	}
 	return &Verifier{
-		// Tokens are issued to the public web client; audience checking is
-		// done per-deployment policy, identity comes from the signature+issuer.
-		verifier: provider.Verifier(&oidc.Config{SkipClientIDCheck: true}),
+		// Keycloak puts the requesting client in `azp` (aud carries
+		// `account`), so the audience pin is enforced on azp below rather
+		// than through go-oidc's ClientID check.
+		verifier:   provider.Verifier(&oidc.Config{SkipClientIDCheck: true}),
+		allowedAzp: cfg.KeycloakWebClient,
 	}, nil
 }
 
@@ -43,9 +49,12 @@ type tokenClaims struct {
 	Email             string `json:"email"`
 	Name              string `json:"name"`
 	PreferredUsername string `json:"preferred_username"`
+	Azp               string `json:"azp"`
 }
 
-// VerifyToken checks signature, issuer, and expiry, and returns the caller.
+// VerifyToken checks signature, issuer, expiry, and the authorized party,
+// and returns the caller (with the token's expiry, so downstream long-lived
+// sessions — WebSockets — can end when the credential does).
 func (v *Verifier) VerifyToken(ctx context.Context, raw string) (*domain.Principal, error) {
 	if raw == "" {
 		return nil, domain.ErrUnauthorized
@@ -58,9 +67,15 @@ func (v *Verifier) VerifyToken(ctx context.Context, raw string) (*domain.Princip
 	if err := idToken.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("%w: bad claims", domain.ErrUnauthorized)
 	}
+	if v.allowedAzp != "" && claims.Azp != v.allowedAzp {
+		return nil, fmt.Errorf("%w: token issued to client %q", domain.ErrUnauthorized, claims.Azp)
+	}
 	name := claims.Name
 	if name == "" {
 		name = claims.PreferredUsername
 	}
-	return &domain.Principal{Sub: idToken.Subject, Email: claims.Email, Name: name}, nil
+	return &domain.Principal{
+		Sub: idToken.Subject, Email: claims.Email, Name: name,
+		ExpiresAt: idToken.Expiry,
+	}, nil
 }

@@ -1,6 +1,6 @@
 // Thin typed API client. Every call carries the Keycloak bearer token; the
 // share token (for boards opened via share links) rides along when present.
-import { getToken } from '../auth/keycloak';
+import { forceRefreshToken, getToken, isAuthenticated } from '../auth/keycloak';
 import type {
   BoardView, Label, LinkMetadata, Op, PresignResult, QComment, QElement,
   QNotification, ShareState, TrashItem, Txn, User, UserSettings,
@@ -19,18 +19,29 @@ let sharePassword = '';
 export function setSharePassword(pw: string) { sharePassword = pw; }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${await getToken()}`,
+  const doFetch = (token: string) => {
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (shareToken) headers['X-Share-Token'] = shareToken;
+    if (sharePassword) headers['X-Share-Password'] = sharePassword;
+    return fetch(BASE + path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
   };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (shareToken) headers['X-Share-Token'] = shareToken;
-  if (sharePassword) headers['X-Share-Password'] = sharePassword;
 
-  const res = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res = await doFetch(await getToken());
+
+  // A 401 on an authenticated session usually means the access token just
+  // rolled over — force one refresh and retry once. A second 401 falls
+  // through as a real error (the refresh path already handles dead sessions).
+  if (res.status === 401 && isAuthenticated()) {
+    const fresh = await forceRefreshToken();
+    if (fresh) res = await doFetch(fresh);
+  }
+
   if (!res.ok) {
     let message = `${res.status}`;
     try {

@@ -190,20 +190,16 @@ func (h *Handlers) IssueRealtimeTicket(c echo.Context) error {
 func (h *Handlers) WebSocket(c echo.Context) error {
 	ctx := c.Request().Context()
 
-	// Prefer a single-use ticket; fall back to a bearer token for tooling.
-	var p *domain.Principal
-	if ticket := c.QueryParam("ticket"); ticket != "" {
-		redeemed, ok := h.Tickets.Redeem(ticket, time.Now())
-		if !ok {
-			return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired ticket")
-		}
-		p = redeemed
-	} else {
-		verified, err := h.Verifier.VerifyToken(ctx, c.QueryParam("token"))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-		}
-		p = verified
+	// Ticket-only handshake: bearer tokens never appear in WS URLs (they
+	// would land in proxy/access logs). Tooling obtains a ticket the same
+	// way the app does — POST /realtime/ticket with its bearer.
+	ticket := c.QueryParam("ticket")
+	if ticket == "" {
+		return echo.NewHTTPError(http.StatusUnauthorized, "missing ticket")
+	}
+	p, ok := h.Tickets.Redeem(ticket, time.Now())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired ticket")
 	}
 	if st := c.QueryParam("shareToken"); st != "" {
 		p.ShareToken = st

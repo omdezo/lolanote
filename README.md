@@ -111,6 +111,28 @@ automatically and syncs to your account:
   cursors, and editing indicators), email visibility, and **Download my
   data** (full JSON export of everything you own).
 
+## Auth, sessions & security
+
+- **Branded login** — Keycloak serves the custom `qomranote` login theme
+  (`keycloak/themes/`, mounted read-only), styled like the app in light and
+  dark. Registration, reset-password, and error pages inherit it.
+- **JWT verification** — signature + issuer + expiry via realm JWKS, plus an
+  authorized-party pin: only tokens minted for `qomranote-web` are accepted
+  (`KEYCLOAK_WEB_CLIENT_ID`).
+- **No tokens in URLs** — bearer tokens are Authorization-header-only, and
+  the WebSocket handshake takes a 30-second single-use ticket exchanged over
+  the authenticated REST channel.
+- **Sockets die with their credential** — a WebSocket closes when the JWT
+  that opened it expires (close code 4401); the client reconnects with a
+  fresh ticket and refetches the board.
+- **Sessions** — access tokens 15 min; SSO 4 h idle / 12 h max, or 14/30
+  days with *Remember me*; refresh tokens rotate on every use. The SPA keeps
+  tokens in memory only, refreshes single-flight, retries one 401 with a
+  forced refresh, and shows a "session expired" toast before re-login.
+- **Web tier** — immutable caching for hashed assets, `no-cache` for
+  index.html (deploys land without hard refresh), nosniff / frame-deny /
+  referrer / permissions headers.
+
 ## Switching file storage to Cloudflare R2
 
 1. Cloudflare dashboard → **R2** → create bucket (default name `qomranote`).

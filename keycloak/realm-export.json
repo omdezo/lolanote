@@ -2,6 +2,8 @@
   "realm": "qomranote",
   "enabled": true,
   "displayName": "QomraNote",
+  "displayNameHtml": "<div class=\"qn-brand\"><span class=\"qn-brand-mark\">Q</span><span class=\"qn-brand-name\">Qomra<em>Note</em></span></div>",
+  "loginTheme": "qomranote",
   "registrationAllowed": true,
   "registrationEmailAsUsername": false,
   "loginWithEmailAllowed": true,
@@ -10,7 +12,12 @@
   "bruteForceProtected": true,
   "sslRequired": "external",
   "accessTokenLifespan": 900,
-  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionIdleTimeout": 14400,
+  "ssoSessionMaxLifespan": 43200,
+  "ssoSessionIdleTimeoutRememberMe": 1209600,
+  "ssoSessionMaxLifespanRememberMe": 2592000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
   "clients": [
     {
       "clientId": "qomranote-web",

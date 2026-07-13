@@ -70,8 +70,9 @@ func (s *Server) Start(ctx context.Context) error {
 const principalKey = "qomra.principal"
 
 // authMiddleware verifies the bearer token and stashes the Principal.
-// Tokens arrive via Authorization header or, for WebSocket/anchor contexts,
-// a ?token= query parameter.
+// Tokens are accepted from the Authorization header ONLY — query-string
+// credentials leak into access logs and referrers (WebSockets use the
+// single-use ticket exchange instead).
 func authMiddleware(verifier *auth.Verifier, required bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -98,7 +99,7 @@ func bearerToken(c echo.Context) string {
 	if h := c.Request().Header.Get(echo.HeaderAuthorization); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	return c.QueryParam("token")
+	return ""
 }
 
 // principal fetches the verified caller; handlers can rely on it existing on
