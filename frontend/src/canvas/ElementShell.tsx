@@ -11,6 +11,7 @@ import { elementDir, hasTextDirection, type TextDirection } from '../lib/directi
 import { createOp, deleteOp, moveOp, updateOp, useBoard } from '../store/boardStore';
 import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
+import { highlightConnectTarget } from './LineLayer';
 import { ElementView } from '../components/elements/ElementView';
 import {
   AliasArrow, BoardIcon, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
@@ -359,10 +360,12 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
             const onMove = (ev: PointerEvent) => {
               const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);
               useView.getState().setLineDraft({ sourceId: element.id, x: pt.x, y: pt.y });
+              highlightConnectTarget(ev, element.id);
             };
             const onUp = (ev: PointerEvent) => {
               window.removeEventListener('pointermove', onMove);
               window.removeEventListener('pointerup', onUp);
+              highlightConnectTarget(null);
               useView.getState().setLineDraft(null);
               const state = useBoard.getState();
               const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);

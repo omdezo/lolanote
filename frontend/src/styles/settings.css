@@ -393,3 +393,8 @@
 .ip-cell svg { color: var(--ink-2); }
 .ip-cell:hover svg { color: var(--ink); }
 .ip-cell.on svg { color: var(--accent); }
+
+/* Endpoint handle halo (large invisible grab area) + connect-drop highlight */
+.line-handle-halo { fill: transparent; cursor: grab; pointer-events: auto; }
+.el.connect-target { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-2); }
+.el.connect-target .tile { transform: scale(1.04); }

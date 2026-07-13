@@ -17,6 +17,20 @@ const EXTENT = 100_000; // virtual canvas half-extent for the SVG surface
 const LINE_COLORS = ['#8a86a0', '#1d1d1f', '#f5f5f7', '#5e5ce6', '#1c7ed6', '#0ca678', '#f2a20d', '#e8590c', '#e64980'];
 const WEIGHTS = [1.5, 2.5, 4, 6];
 
+// highlightConnectTarget lights up the card under the pointer while a line
+// endpoint (or a new connection from a card anchor) is being dragged.
+// Pass null (or an event over open canvas) to clear.
+let lastConnectTarget: Element | null = null;
+export function highlightConnectTarget(ev: PointerEvent | null, excludeId?: string) {
+  const shell = ev
+    ? document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-element-id]')
+    : null;
+  const valid = shell && shell.getAttribute('data-element-id') !== excludeId ? shell : null;
+  if (lastConnectTarget && lastConnectTarget !== valid) lastConnectTarget.classList.remove('connect-target');
+  if (valid) valid.classList.add('connect-target');
+  lastConnectTarget = valid;
+}
+
 interface Pt { x: number; y: number }
 interface EndInfo extends Pt { w: number; h: number; free: boolean }
 
@@ -138,7 +152,8 @@ export function LineLayer() {
 
   // startHandleDrag wires an endpoint/curve handle to the pointer. Endpoints
   // commit a reconnect (drop on a card) or a free point; the curve handle
-  // commits content.curve. All through updateOp → undoable.
+  // commits content.curve. All through updateOp → undoable. While an
+  // endpoint travels, the card under the pointer lights up as a drop target.
   const startHandleDrag = (e: React.PointerEvent, line: QElement, kind: 'from' | 'to' | 'curve', geo: { p0: Pt; p1: Pt }) => {
     e.stopPropagation();
     e.preventDefault();
@@ -148,6 +163,7 @@ export function LineLayer() {
 
     const onMove = (ev: PointerEvent) => {
       const pt = toCanvas(ev);
+      if (kind !== 'curve') highlightConnectTarget(ev, line.id);
       if (kind === 'curve') {
         // Signed distance from the chord, doubled so the curve passes
         // through the pointer (quadratic bezier midpoint = ½ control offset).
@@ -163,6 +179,7 @@ export function LineLayer() {
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      highlightConnectTarget(null);
       const state = useBoard.getState();
       const pt = toCanvas(ev);
       setHandleDrag(null);
@@ -204,6 +221,10 @@ export function LineLayer() {
   // Assigned inside the render map (TS's flow analysis can't see it, hence
   // the cast at the usage site below).
   let toolbar: { line: QElement; x: number; y: number } | null = null;
+  // Handles render in a separate overlay svg ABOVE the element shells —
+  // otherwise a handle sitting at a card's edge is unclickable (the card,
+  // painted later, would swallow the pointer).
+  const handleNodes: JSX.Element[] = [];
 
   const rendered = lines.map((line) => {
     const from = resolveEnd(line, 'from');
@@ -228,7 +249,7 @@ export function LineLayer() {
 
     if (soloLine?.id === line.id) toolbar = { line, x: hx, y: hy };
 
-    return (
+    const node = (
       <g key={line.id} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
         <path
           d={`M ${p0.x} ${p0.y} Q ${cx} ${cy} ${p1.x} ${p1.y}`}
@@ -259,33 +280,33 @@ export function LineLayer() {
         {line.content?.label && (
           <text className="line-label" x={hx} y={hy - 10}>{line.content.label}</text>
         )}
-        {selectedLine && (
-          <>
-            {/* endpoint handles: drag to reconnect or drop on open canvas */}
-            <circle
-              className="line-handle"
-              cx={p0.x} cy={p0.y} r={7}
-              onPointerDown={(e) => startHandleDrag(e, line, 'from', { p0, p1 })}
-            />
-            <circle
-              className="line-handle"
-              cx={p1.x} cy={p1.y} r={7}
-              onPointerDown={(e) => startHandleDrag(e, line, 'to', { p0, p1 })}
-            />
-            {/* curve handle: drag to bend, double-click to straighten */}
-            <circle
-              className="line-handle curve"
-              cx={hx} cy={hy} r={6}
-              onPointerDown={(e) => startHandleDrag(e, line, 'curve', { p0, p1 })}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                void commitTransaction([updateOp(line, { content: { curve: 0 } })]);
-              }}
-            />
-          </>
-        )}
       </g>
     );
+
+    if (selectedLine) {
+      // Each handle carries an invisible halo so it's easy to grab.
+      const handle = (kind: 'from' | 'to' | 'curve', x: number, y: number) => (
+        <g key={`${line.id}-${kind}`}>
+          <circle
+            className="line-handle-halo"
+            cx={x} cy={y} r={14}
+            onPointerDown={(e) => startHandleDrag(e, line, kind, { p0, p1 })}
+            onDoubleClick={kind === 'curve' ? (e) => {
+              e.stopPropagation();
+              void commitTransaction([updateOp(line, { content: { curve: 0 } })]);
+            } : undefined}
+          />
+          <circle
+            className={`line-handle${kind === 'curve' ? ' curve' : ''}`}
+            cx={x} cy={y} r={kind === 'curve' ? 6 : 7}
+            style={{ pointerEvents: 'none' }}
+          />
+        </g>
+      );
+      handleNodes.push(handle('from', p0.x, p0.y), handle('to', p1.x, p1.y), handle('curve', hx, hy));
+    }
+
+    return node;
   });
 
   return (
@@ -314,6 +335,19 @@ export function LineLayer() {
           );
         })()}
       </svg>
+      {handleNodes.length > 0 && (
+        <svg
+          style={{ position: 'absolute', left: -EXTENT, top: -EXTENT, overflow: 'visible', pointerEvents: 'none', zIndex: 25 }}
+          width={EXTENT * 2}
+          height={EXTENT * 2}
+          viewBox={`${-EXTENT} ${-EXTENT} ${EXTENT * 2} ${EXTENT * 2}`}
+        >
+          {/* While a handle drag is in flight the whole overlay goes
+              pointer-transparent — otherwise the traveling handle sits on
+              top of the drop card and steals elementFromPoint. */}
+          <g style={{ pointerEvents: handleDrag ? 'none' : 'auto' }}>{handleNodes}</g>
+        </svg>
+      )}
       {(() => {
         const tb = toolbar as { line: QElement; x: number; y: number } | null;
         return tb ? <LineToolbar line={tb.line} x={tb.x} y={tb.y} /> : null;
