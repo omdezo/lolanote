@@ -67,6 +67,7 @@ export function PromptHost() {
               <textarea
                 ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                 className="search-input"
+                dir="auto"
                 rows={3}
                 placeholder={spec.placeholder}
                 value={value}
@@ -76,6 +77,7 @@ export function PromptHost() {
               <input
                 ref={inputRef as React.RefObject<HTMLInputElement>}
                 className="search-input"
+                dir="auto"
                 placeholder={spec.placeholder}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}

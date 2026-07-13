@@ -105,6 +105,12 @@ const en = {
   'common.on': 'On', 'common.off': 'Off',
   'common.saving': 'Saving…', 'common.saved': 'All changes saved',
   'common.close': 'Close',
+
+  'dir.label': 'Text direction',
+  'dir.auto': 'Auto — by first letter',
+  'dir.ltr': 'Left to right',
+  'dir.rtl': 'Right to left',
+  'dir.cycleTip': 'Text direction — Auto detects from the first letter',
 };
 
 type Dict = typeof en;
@@ -208,6 +214,12 @@ const ar: Record<TKey, string> = {
   'common.on': 'مفعّل', 'common.off': 'معطّل',
   'common.saving': 'جارٍ الحفظ…', 'common.saved': 'تم حفظ كل التغييرات',
   'common.close': 'إغلاق',
+
+  'dir.label': 'اتجاه النص',
+  'dir.auto': 'تلقائي — حسب أول حرف',
+  'dir.ltr': 'من اليسار إلى اليمين',
+  'dir.rtl': 'من اليمين إلى اليسار',
+  'dir.cycleTip': 'اتجاه النص — تلقائي يكتشف من أول حرف',
 };
 
 const dicts: Record<Language, Record<TKey, string>> = { en, ar };

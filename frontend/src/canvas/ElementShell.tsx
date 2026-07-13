@@ -6,11 +6,16 @@ import { memo, useCallback, useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import type { QElement } from '../api/types';
 import { api } from '../api/client';
+import { t } from '../i18n';
+import { elementDir, hasTextDirection, type TextDirection } from '../lib/direction';
 import { createOp, deleteOp, moveOp, updateOp, useBoard } from '../store/boardStore';
 import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementView } from '../components/elements/ElementView';
-import { AliasArrow, ColumnIcon, DuplicateIcon, LabelIcon, LockIcon, SyncIcon, TemplateIcon, TrashIcon } from '../components/Icons';
+import {
+  AliasArrow, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
+  LabelIcon, LockIcon, SyncIcon, TemplateIcon, TrashIcon,
+} from '../components/Icons';
 import { useContextMenu } from '../components/ui/ContextMenu';
 import { LabelChips, useLabelPopover } from '../components/ui/LabelPopover';
 import { newObjectId } from '../lib/objectId';
@@ -208,11 +213,31 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
     const multi = state.selection.size > 1;
     const locked = !!element.content?.locked;
 
+    // Text direction targets the content carrier: clones share their source
+    // card's content, so the override lands on the source and syncs everywhere.
+    const dirTarget = element.type === 'CLONE'
+      ? state.elements[element.content?.cloneSourceId] ?? element
+      : element;
+    const dir = elementDir(dirTarget);
+    const setDir = (next: TextDirection) =>
+      void state.commitTransaction([updateOp(dirTarget, {
+        content: { textDirection: next === 'auto' ? null : next },
+      })]);
+
     const items = [
       { label: 'Duplicate', icon: <DuplicateIcon size={15} />, onClick: () => void onDuplicate() },
       ...(element.type === 'CARD' ? [{ label: 'Make synced copy', icon: <SyncIcon size={15} />, onClick: () => void onSyncCopy() }] : []),
       { label: locked ? 'Unlock' : 'Lock', icon: <LockIcon size={15} />, onClick: () => void state.commitTransaction([updateOp(element, { content: { locked: !locked } })]) },
       { label: 'Add label', icon: <LabelIcon size={15} />, onClick: () => useLabelPopover.getState().open(e.clientX, e.clientY, Array.from(useBoard.getState().selection)) },
+      ...(hasTextDirection(element) ? [{
+        label: t('dir.label'),
+        icon: dir === 'rtl' ? <DirRtlIcon size={15} /> : dir === 'ltr' ? <DirLtrIcon size={15} /> : <DirAutoIcon size={15} />,
+        sub: [
+          { label: t('dir.auto'), icon: <DirAutoIcon size={15} />, checked: dir === 'auto', onClick: () => setDir('auto') },
+          { label: t('dir.rtl'), icon: <DirRtlIcon size={15} />, checked: dir === 'rtl', onClick: () => setDir('rtl') },
+          { label: t('dir.ltr'), icon: <DirLtrIcon size={15} />, checked: dir === 'ltr', onClick: () => setDir('ltr') },
+        ],
+      }] : []),
       ...(multi ? [{ label: 'Group into column', icon: <ColumnIcon size={15} />, onClick: groupIntoColumn }] : []),
       ...(element.type === 'BOARD' ? [{ label: 'Create shortcut', icon: <AliasArrow size={15} />, onClick: () => void createShortcut(element) }] : []),
       ...(element.type === 'BOARD' ? [{

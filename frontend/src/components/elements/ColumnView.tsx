@@ -4,6 +4,7 @@
 // live count; collapse hides the body.
 import { useMemo, useState } from 'react';
 import type { QElement } from '../../api/types';
+import { dirAttr, elementDir } from '../../lib/direction';
 import { createOp, updateOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
 import { ElementShell } from '../../canvas/ElementShell';
@@ -56,6 +57,7 @@ export function ColumnView({ element, navigate, viewportRef }: ElementViewProps)
         </button>
         <input
           className="column-title"
+          dir={dirAttr(elementDir(element))}
           value={title ?? element.content?.title ?? ''}
           placeholder="Column title"
           onChange={(e) => setTitle(e.target.value)}

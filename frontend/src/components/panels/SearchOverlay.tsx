@@ -56,6 +56,7 @@ export function SearchOverlay({ onClose, navigate }: Props) {
           <input
             ref={inputRef}
             className="search-input"
+            dir="auto"
             placeholder="Search notes, boards, links, files…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

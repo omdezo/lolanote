@@ -7,10 +7,15 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { QElement } from '../../api/types';
+import { t } from '../../i18n';
+import { cycleDir, elementDir, type TextDirection } from '../../lib/direction';
 import { sendEditing } from '../../realtime/socket';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
-import { BoldIcon, CodeIcon, H1Icon, H2Icon, ItalicIcon, ListIcon, QuoteIcon, StrikeIcon, SyncIcon } from '../Icons';
+import {
+  BoldIcon, CodeIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, H1Icon, H2Icon,
+  ItalicIcon, ListIcon, QuoteIcon, StrikeIcon, SyncIcon,
+} from '../Icons';
 
 interface Props {
   element: QElement;       // the CARD/DOCUMENT whose content we edit
@@ -72,13 +77,24 @@ export function NoteCard({ element, cloneShellId }: Props) {
 
   const bg = element.content?.backgroundColor;
 
+  // Text direction: 'auto' resolves per paragraph from its first strong
+  // letter (Arabic → RTL) via unicode-bidi: plaintext; a manual override
+  // forces the whole card until switched back (format bar or context menu).
+  const dir = elementDir(element);
+  const setDir = (next: TextDirection) => {
+    void commitTransaction([updateOp(element, {
+      content: { textDirection: next === 'auto' ? null : next },
+    })]);
+  };
+
   return (
     <div
-      className={`note-card${isHeading ? ' heading-note' : ''}`}
+      className={`note-card${isHeading ? ' heading-note' : ''}${dir === 'auto' ? ' bidi-auto' : ''}`}
+      dir={dir === 'auto' ? undefined : dir}
       style={bg ? { background: bg } : undefined}
       onDoubleClick={(e) => { e.stopPropagation(); startEditing(); }}
     >
-      {editing && editor && !isHeading && <FormatBar editor={editor} />}
+      {editing && editor && !isHeading && <FormatBar editor={editor} dir={dir} onCycleDir={() => setDir(cycleDir(dir))} />}
       <EditorContent editor={editor} />
       {cloneShellId && (
         <div className="clone-footer" title="This note is synced — edits update every copy">
@@ -91,7 +107,11 @@ export function NoteCard({ element, cloneShellId }: Props) {
 
 // FormatBar: the dark floating toolbar shown while a note is being edited.
 // onMouseDown preventDefault keeps focus in the editor while clicking.
-function FormatBar({ editor }: { editor: NonNullable<ReturnType<typeof useEditor>> }) {
+function FormatBar({ editor, dir, onCycleDir }: {
+  editor: NonNullable<ReturnType<typeof useEditor>>;
+  dir: TextDirection;
+  onCycleDir: () => void;
+}) {
   const btn = (
     key: string,
     icon: JSX.Element,
@@ -119,6 +139,15 @@ function FormatBar({ editor }: { editor: NonNullable<ReturnType<typeof useEditor
       {btn('ul', <ListIcon size={15} />, () => c().toggleBulletList().run(), editor.isActive('bulletList'))}
       {btn('q', <QuoteIcon size={15} />, () => c().toggleBlockquote().run(), editor.isActive('blockquote'))}
       {btn('code', <CodeIcon size={15} />, () => c().toggleCodeBlock().run(), editor.isActive('codeBlock'))}
+      <button
+        className={dir !== 'auto' ? 'on' : undefined}
+        title={`${t('dir.cycleTip')} · ${t(dir === 'auto' ? 'dir.auto' : dir === 'rtl' ? 'dir.rtl' : 'dir.ltr')}`}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onCycleDir}
+      >
+        {dir === 'rtl' ? <DirRtlIcon size={15} /> : dir === 'ltr' ? <DirLtrIcon size={15} /> : <DirAutoIcon size={15} />}
+      </button>
     </div>
   );
 }

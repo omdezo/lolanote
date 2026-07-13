@@ -82,6 +82,7 @@ export function UnsortedTray({ onClose }: { onClose: () => void }) {
       <div className="panel-body">
         <input
           className="quick-capture"
+          dir="auto"
           placeholder="Quick note… (Enter to capture)"
           value={capture}
           onChange={(e) => setCapture(e.target.value)}

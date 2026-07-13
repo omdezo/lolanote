@@ -211,3 +211,12 @@ export const ClockIcon = (p: P) => (
 export const DownloadIcon = (p: P) => (
   <svg {...base(p)}><path d="M12 4.5v10M8 11l4 4 4-4" /><path d="M5 19.5h14" /></svg>
 );
+export const DirAutoIcon = (p: P) => (
+  <svg {...base(p)}><path d="M5 6h14M7.5 10.5h9M5 15h14" opacity="0.45" /><path d="m8.5 21 2.2-5h.6l2.2 5M9.3 19.3h3.4" /><path d="M15.5 18.5h4M17.8 16.8l1.7 1.7-1.7 1.7" /></svg>
+);
+export const DirLtrIcon = (p: P) => (
+  <svg {...base(p)}><path d="M4.5 6h11M4.5 10.5h8M4.5 15h11" /><path d="M13.5 19.5h6M17.2 17.2l2.3 2.3-2.3 2.3" /></svg>
+);
+export const DirRtlIcon = (p: P) => (
+  <svg {...base(p)}><path d="M8.5 6h11M11.5 10.5h8M8.5 15h11" /><path d="M10.5 19.5h-6M6.8 17.2 4.5 19.5l2.3 2.3" /></svg>
+);

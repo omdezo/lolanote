@@ -203,3 +203,34 @@
 }
 .task-date-pop input:focus { border-color: var(--accent); }
 .task-date-pop .tdp-clear { color: var(--danger); font-size: 12px; font-weight: 600; align-self: flex-start; }
+
+/* ============ Bidirectional text (RTL/LTR) ============
+   'Auto' resolves each paragraph/field from its FIRST strong letter
+   (Arabic → RTL, Latin → LTR) — unicode-bidi: plaintext for rich text,
+   dir="auto" for inputs. A per-element override (context menu or format
+   bar) forces the whole card via dir="rtl"/"ltr" on its wrapper. */
+.bidi-auto .ProseMirror :is(p, h1, h2, h3, h4, li, blockquote) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+/* Forced direction: paragraphs follow the wrapper, no per-block detection. */
+[dir] .ProseMirror :is(p, h1, h2, h3, h4, li, blockquote) { text-align: start; }
+/* Caret + placeholder follow the resolved direction. */
+.note-card .ProseMirror p.is-editor-empty:first-child::before { float: inline-start; }
+
+/* Display-only text auto-detects everywhere (titles, previews, messages). */
+.link-title, .link-desc, .file-name, .doc-title, .doc-preview,
+.notif-msg, .comment-msg, .board-title, .pi-title, .search-result .sr-text {
+  unicode-bidi: plaintext;
+}
+
+/* ---- context-menu submenus (Text direction ▸ …) ---- */
+.ctx-item-wrap { position: relative; }
+.ctx-sub-arrow { margin-left: auto; display: flex; color: var(--ink-3); }
+.ctx-item:hover .ctx-sub-arrow { color: inherit; }
+.ctx-submenu {
+  position: absolute; left: calc(100% - 4px); top: -5px; min-width: 200px;
+}
+.ctx-submenu.flipped { left: auto; right: calc(100% - 4px); }
+.ctx-check { margin-left: auto; font-weight: 700; color: var(--accent); }
+.ctx-item.checked { color: var(--accent); }

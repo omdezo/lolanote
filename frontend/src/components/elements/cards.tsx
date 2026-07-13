@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { QComment, QElement } from '../../api/types';
 import { api } from '../../api/client';
 import { currentSub } from '../../auth/keycloak';
+import { dirAttr, elementDir } from '../../lib/direction';
 import { updateOp, useBoard } from '../../store/boardStore';
 import type { ElementViewProps } from './ElementView';
 import { AliasArrow, AudioIcon, BoardGlyph, CommentIcon, FileIcon, SyncIcon, VideoIcon } from '../Icons';
@@ -58,10 +59,11 @@ export function BoardCard({ element, navigate }: ElementViewProps) {
         {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={12} /></div>}
       </div>
       {editTitle === null ? (
-        <div className="board-title" onDoubleClick={(e) => { e.stopPropagation(); if (!isAlias) setEditTitle(title); }}>{title}</div>
+        <div className="board-title" dir={dirAttr(elementDir(element))} onDoubleClick={(e) => { e.stopPropagation(); if (!isAlias) setEditTitle(title); }}>{title}</div>
       ) : (
         <input
           className="board-title-input"
+          dir={dirAttr(elementDir(element))}
           autoFocus
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
@@ -172,6 +174,7 @@ export function ImageCard({ element }: { element: QElement }) {
       <img src={c.url} alt={c.caption ?? ''} draggable={false} />
       <input
         className="image-caption"
+        dir={dirAttr(elementDir(element))}
         placeholder="Add a caption"
         value={caption ?? c.caption ?? ''}
         onChange={(e) => setCaption(e.target.value)}
@@ -362,11 +365,13 @@ export function CommentCard({ element }: { element: QElement }) {
     setBody('');
   };
 
+  const dir = dirAttr(elementDir(element));
+
   return (
     <div className="comment-card">
       <div className="thread-title"><CommentIcon size={13} /> COMMENTS</div>
       {comments.map((c) => (
-        <div key={c.id} className="comment-msg">
+        <div key={c.id} className="comment-msg" dir={dir}>
           <div className="author">{c.authorId === currentSub() ? 'You' : c.authorId.slice(0, 8)}</div>
           {c.body}
           <ReactionBar comment={c} onUpdate={(u) => setComments((cs) => cs.map((x) => (x.id === u.id ? u : x)))} />
@@ -374,6 +379,7 @@ export function CommentCard({ element }: { element: QElement }) {
       ))}
       <input
         className="comment-input"
+        dir={dir}
         placeholder="Reply… (Enter to send)"
         value={body}
         onChange={(e) => setBody(e.target.value)}

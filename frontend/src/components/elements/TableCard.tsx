@@ -5,6 +5,7 @@
 // this is a clean-room grid with the formula engine as a future extension.)
 import { useState } from 'react';
 import type { QElement } from '../../api/types';
+import { dirAttr, elementDir } from '../../lib/direction';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { MinusIcon, PlusIcon } from '../Icons';
 
@@ -51,6 +52,7 @@ export function TableCard({ element }: { element: QElement }) {
                   <td key={c}>
                     <input
                       className={isNumeric(value) && r > 0 ? 'num' : undefined}
+                      dir={isNumeric(value) && r > 0 ? 'ltr' : dirAttr(elementDir(element))}
                       value={value}
                       onFocus={() => setDraft({ r, c, v: val })}
                       onChange={(e) => setDraft({ r, c, v: e.target.value })}

@@ -7,6 +7,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { QElement } from '../../api/types';
+import { dirAttr, elementDir } from '../../lib/direction';
 import { sendEditing } from '../../realtime/socket';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { CheckIcon, DocumentIcon } from '../Icons';
@@ -55,19 +56,27 @@ function DocumentEditor({ element, onClose }: { element: QElement; onClose: () =
     onClose();
   };
 
+  // 'auto' detects per paragraph from the first strong letter; a manual
+  // override (element context menu) forces the whole document.
+  const dir = elementDir(element);
+
   return (
     <div className="modal-backdrop" onClick={save} onPointerDown={(e) => e.stopPropagation()}>
       <div className="modal doc-editor" onClick={(e) => e.stopPropagation()}>
         <div className="doc-editor-head">
           <input
             className="doc-editor-title"
+            dir={dirAttr(dir)}
             value={title}
             placeholder="Untitled document"
             onChange={(e) => setTitle(e.target.value)}
           />
           <button className="pi-btn" onClick={save}><CheckIcon size={14} /> Done</button>
         </div>
-        <div className="doc-editor-body">
+        <div
+          className={`doc-editor-body${dir === 'auto' ? ' bidi-auto' : ''}`}
+          dir={dir === 'auto' ? undefined : dir}
+        >
           <EditorContent editor={editor} />
         </div>
       </div>

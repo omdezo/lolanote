@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react';
 import type { QElement } from '../../api/types';
 import { formatDate } from '../../i18n';
+import { dirAttr, elementDir } from '../../lib/direction';
 import { createOp, deleteOp, updateOp, useBoard } from '../../store/boardStore';
 import { useLocalization } from '../../store/settingsStore';
 import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon } from '../Icons';
@@ -33,10 +34,15 @@ export function TaskListView({ element }: { element: QElement }) {
     setNewTask('');
   };
 
+  // The list's direction override applies to every row; 'auto' lets each
+  // field follow its own first strong letter (Arabic → RTL) as you type.
+  const dir = dirAttr(elementDir(element));
+
   return (
-    <div className="task-list">
+    <div className="task-list" dir={dir === 'auto' ? undefined : dir}>
       <input
         className="tl-title"
+        dir={dir}
         value={title ?? element.content?.title ?? ''}
         placeholder="To-do list"
         onChange={(e) => setTitle(e.target.value)}
@@ -49,10 +55,11 @@ export function TaskListView({ element }: { element: QElement }) {
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       />
       {tasks.map((task) => (
-        <TaskRow key={task.id} task={task} />
+        <TaskRow key={task.id} task={task} dir={dir} />
       ))}
       <input
         className="task-add"
+        dir={dir}
         placeholder="+ Add a task"
         value={newTask}
         onChange={(e) => setNewTask(e.target.value)}
@@ -63,7 +70,7 @@ export function TaskListView({ element }: { element: QElement }) {
   );
 }
 
-function TaskRow({ task }: { task: QElement }) {
+function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' }) {
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [text, setText] = useState<string | null>(null);
   const [datePop, setDatePop] = useState<{ x: number; y: number } | null>(null);
@@ -94,6 +101,7 @@ function TaskRow({ task }: { task: QElement }) {
         </button>
         <input
           className="task-text"
+          dir={dir}
           value={text ?? task.content?.text ?? ''}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => {
