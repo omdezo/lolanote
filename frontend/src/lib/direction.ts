@@ -37,53 +37,25 @@ export function hasTextDirection(element: QElement): boolean {
   return TEXT_TYPES.has(element.type);
 }
 
-// ---- Contextual Arabic-Indic (Hindi) numerals ------------------------------
-// While typing inside Arabic text, the number row produces ٠١٢٣٤٥٦٧٨٩ instead
-// of 0123456789 — decided per keystroke from the nearest strong letter around
-// the caret (Word's "context" digit behavior). Existing text, pasted content,
-// and URLs are never rewritten retroactively.
+// ---- Arabic-Indic (Hindi) numerals -----------------------------------------
+// The rule mirrors the direction rule: the FIRST strong letter of the field
+// (or, in rich text, of the paragraph, falling back to the whole note)
+// decides. Starts with Arabic → every digit typed there becomes ٠١٢٣٤٥٦٧٨٩;
+// starts with Latin → digits stay 0-9. A manual direction override (RTL/LTR)
+// forces the numeral system the same way it forces alignment. Existing text
+// and pasted content are never rewritten retroactively.
 
 const ARABIC_LETTER = /[ء-يٮ-ۓەۮۯۺ-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
 const STRONG_LTR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/;
 
-// strongContext returns the script of the nearest strong letter: true for
+// firstStrong returns the script of the first strong letter: true for
 // Arabic, false for LTR, null when the text has none.
-function strongContext(text: string, backwards: boolean): boolean | null {
-  if (backwards) {
-    for (let i = text.length - 1; i >= 0; i--) {
-      const ch = text[i];
-      if (ARABIC_LETTER.test(ch)) return true;
-      if (STRONG_LTR.test(ch)) return false;
-    }
-  } else {
-    for (const ch of text) {
-      if (ARABIC_LETTER.test(ch)) return true;
-      if (STRONG_LTR.test(ch)) return false;
-    }
+function firstStrong(text: string): boolean | null {
+  for (const ch of text) {
+    if (ARABIC_LETTER.test(ch)) return true;
+    if (STRONG_LTR.test(ch)) return false;
   }
   return null;
-}
-
-// convertDigitsContextual rewrites the digits of an insertion: each digit
-// becomes Arabic-Indic when the nearest strong letter before it — inside the
-// inserted text itself, else in the text before the caret, else after — is
-// Arabic. Handles single keystrokes and batch insertions (IME, autocomplete)
-// identically.
-export function convertDigitsContextual(text: string, before: string, after = ''): string {
-  if (!/[0-9]/.test(text)) return text;
-  let ctx = strongContext(before, true);
-  const afterCtx = ctx === null ? strongContext(after, false) : null;
-  let out = '';
-  for (const ch of text) {
-    if (ARABIC_LETTER.test(ch)) ctx = true;
-    else if (STRONG_LTR.test(ch)) ctx = false;
-    if (ch >= '0' && ch <= '9' && (ctx ?? afterCtx) === true) {
-      out += String.fromCharCode(ARABIC_ZERO + ch.charCodeAt(0) - 48);
-    } else {
-      out += ch;
-    }
-  }
-  return out;
 }
 
 const ARABIC_ZERO = 0x0660;
@@ -104,9 +76,11 @@ export function normalizeDigits(s: string): string {
 // initSmartDigits installs ONE native beforeinput listener that covers every
 // plain text field in the app (React's onBeforeInput rides the legacy
 // textInput event and never sees native beforeinput, so per-component props
-// cannot do this). Typed digits in an Arabic context become Arabic-Indic via
-// execCommand, keeping the native undo stack and caret intact. Rich-text
-// editors (contenteditable) are skipped — ProseMirror has its own hook below.
+// cannot do this). Whether a field is "Arabic" comes from its resolved
+// direction: dir="auto" fields resolve RTL natively once their first strong
+// letter is Arabic, and a manual RTL/LTR override wins either way. Digits
+// are converted via execCommand so the native undo stack and caret survive.
+// Rich-text editors (contenteditable) are skipped — ProseMirror hook below.
 const SMART_INPUT_TYPES = new Set(['text', 'search', '']);
 
 export function initSmartDigits(): void {
@@ -117,9 +91,17 @@ export function initSmartDigits(): void {
     const isText = el instanceof HTMLTextAreaElement
       || (el instanceof HTMLInputElement && SMART_INPUT_TYPES.has(el.type));
     if (!isText) return;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? start;
-    const converted = convertDigitsContextual(ev.data, el.value.slice(0, start), el.value.slice(end));
+
+    // Field starts with Arabic (dir=auto resolves rtl) or is forced RTL.
+    let arabic = getComputedStyle(el).direction === 'rtl';
+    if (!arabic && el.getAttribute('dir') !== 'ltr' && firstStrong(el.value) === null) {
+      // Empty field: the insertion itself decides (e.g. autocomplete/IME
+      // committing "مرحبا 5" in one batch).
+      arabic = firstStrong(ev.data) === true;
+    }
+    if (!arabic) return;
+
+    const converted = toArabicDigits(ev.data);
     if (converted === ev.data) return;
     ev.preventDefault();
     document.execCommand('insertText', false, converted);
@@ -127,17 +109,27 @@ export function initSmartDigits(): void {
 }
 
 // smartDigitsTextInput — ProseMirror handleTextInput for the Tiptap editors.
-// Typed loosely so this module stays free of prosemirror type imports.
+// The paragraph's first strong letter decides; an empty paragraph inherits
+// the note's first strong letter (so numbered lines in an Arabic note get
+// Arabic numerals); a forced element direction (dir on the card wrapper)
+// overrides both. Typed loosely to stay free of prosemirror type imports.
 export function smartDigitsTextInput(view: any, from: number, to: number, text: string): boolean {
   if (!/[0-9]/.test(text)) return false;
-  const $from = view.state.doc.resolve(from);
-  const parent = $from.parent;
-  const before = parent.textBetween(0, $from.parentOffset, undefined, ' ');
-  const $to = view.state.doc.resolve(to);
-  const after = $to.parent === parent
-    ? parent.textBetween(Math.min($to.parentOffset, parent.content.size), parent.content.size, undefined, ' ')
-    : '';
-  const converted = convertDigitsContextual(text, before, after);
+
+  let arabic: boolean;
+  const forced = (view.dom as HTMLElement).closest('[dir="rtl"], [dir="ltr"]');
+  if (forced) {
+    arabic = forced.getAttribute('dir') === 'rtl';
+  } else {
+    const $from = view.state.doc.resolve(from);
+    let ctx = firstStrong($from.parent.textContent as string);
+    if (ctx === null) ctx = firstStrong(view.state.doc.textContent as string);
+    if (ctx === null) ctx = firstStrong(text);
+    arabic = ctx === true;
+  }
+  if (!arabic) return false;
+
+  const converted = toArabicDigits(text);
   if (converted === text) return false;
   view.dispatch(view.state.tr.insertText(converted, from, to));
   return true;
