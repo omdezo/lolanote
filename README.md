@@ -72,6 +72,8 @@ make dev-web    # Vite dev server on :5173 (proxies /api and /ws)
 | New note | double-click the canvas (or toolbar 📝) |
 | New board | toolbar 🗂️, double-click to enter, breadcrumbs to go back |
 | Move card(s) | drag; shift-click or marquee for multi-select (one transaction) |
+| Customize a board | right-click → **Color & icon** (tile color + emoji icon) or **Rename**; shortcuts inherit the target's look |
+| Copy / paste | ⌘C/⌘V — cards paste as copies, **boards paste as shortcuts to the same board**, columns bring their contents; pasting text/URLs/screenshots creates notes/links/images |
 | Connect cards | toolbar ↗ or the card's edge anchor, then click the target |
 | Zoom | Ctrl+scroll · fit-all with `Z` · pan with scroll / middle-drag / space-drag |
 | Upload | drop files anywhere, or toolbar 🖼️ |

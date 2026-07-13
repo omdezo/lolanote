@@ -220,3 +220,6 @@ export const DirLtrIcon = (p: P) => (
 export const DirRtlIcon = (p: P) => (
   <svg {...base(p)}><path d="M8.5 6h11M11.5 10.5h8M8.5 15h11" /><path d="M10.5 19.5h-6M6.8 17.2 4.5 19.5l2.3 2.3" /></svg>
 );
+export const RenameIcon = (p: P) => (
+  <svg {...base(p)}><rect x="3.5" y="7" width="17" height="10" rx="2.2" /><path d="M12 4.5v15" strokeWidth="2" /><path d="M7 10.5v3M16.8 10.5v3" opacity="0.6" /></svg>
+);

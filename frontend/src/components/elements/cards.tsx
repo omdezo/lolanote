@@ -26,11 +26,21 @@ function tileFor(id: string) {
 }
 
 const statLabels: Array<[string, string]> = [
-  ['BOARD', 'board'], ['CARD', 'note'], ['IMAGE', 'image'], ['FILE', 'file'],
+  ['BOARD', 'board'], ['CARD', 'card'], ['IMAGE', 'image'], ['FILE', 'file'],
   ['LINK', 'link'], ['TASK_LIST', 'list'], ['DOCUMENT', 'doc'], ['TABLE', 'table'],
 ];
 
-export function BoardCard({ element, navigate }: ElementViewProps) {
+// statLineFor renders "2 boards, 17 cards, 6 files" from a type-count map.
+export function statLineFor(stats: Record<string, number> | undefined): string {
+  if (!stats) return '';
+  return statLabels
+    .filter(([t]) => (stats[t] ?? 0) > 0)
+    .slice(0, 3)
+    .map(([t, label]) => `${stats[t]} ${label}${stats[t] === 1 ? '' : 's'}`)
+    .join(', ');
+}
+
+export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   const { elements, boardStats, commitTransaction } = useBoard();
   const isAlias = element.type === 'ALIAS';
   const target = isAlias ? elements[element.content?.targetBoardId] : element;
@@ -38,45 +48,64 @@ export function BoardCard({ element, navigate }: ElementViewProps) {
   const [editTitle, setEditTitle] = useState<string | null>(null);
   const statsId = isAlias ? element.content?.targetBoardId : element.id;
   const stats = boardStats[statsId];
+  const statLine = statLineFor(stats);
 
-  const statLine = stats
-    ? statLabels
-        .filter(([t]) => (stats[t] ?? 0) > 0)
-        .slice(0, 3)
-        .map(([t, label]) => `${stats[t]} ${label}${stats[t] === 1 ? '' : 's'}`)
-        .join(', ')
-    : '';
+  // Customization (Color / Icon): aliases inherit the target board's look.
+  const styleSource = (isAlias ? target?.content : element.content) ?? {};
+  const tileBg = (styleSource.color as string) || tileFor(statsId ?? element.id);
+  const tileIcon = (styleSource.icon as string) || '';
 
   const open = () => {
     const id = isAlias ? element.content?.targetBoardId : element.id;
     if (id) void navigate(id);
   };
 
+  const commitTitle = () => {
+    if (editTitle && editTitle.trim() && editTitle !== title) {
+      void commitTransaction([updateOp(element, { content: { title: editTitle.trim() } })]);
+    }
+    setEditTitle(null);
+  };
+
+  const titleNode = editTitle === null ? (
+    <div className="board-title" dir={dirAttr(elementDir(element))} onDoubleClick={(e) => { e.stopPropagation(); if (!isAlias) setEditTitle(title); }}>{title}</div>
+  ) : (
+    <input
+      className="board-title-input"
+      dir={dirAttr(elementDir(element))}
+      autoFocus
+      value={editTitle}
+      onChange={(e) => setEditTitle(e.target.value)}
+      onPointerDown={(e) => e.stopPropagation()}
+      onBlur={commitTitle}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+    />
+  );
+
+  // Inside a column: compact horizontal row (small tile · title · stats),
+  // matching Milanote's board rows in columns.
+  if (inColumn) {
+    return (
+      <div className="board-row" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
+        <div className="tile row-tile" style={{ background: tileBg }}>
+          {tileIcon ? <span className="tile-icon">{tileIcon}</span> : <BoardGlyph size={22} />}
+          {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={11} /></div>}
+        </div>
+        <div className="board-row-text">
+          {titleNode}
+          {statLine && <div className="board-stats">{statLine}</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="board-card" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
-      <div className="tile" style={{ background: tileFor(statsId ?? element.id) }}>
-        <BoardGlyph size={30} />
+      <div className="tile" style={{ background: tileBg }}>
+        {tileIcon ? <span className="tile-icon">{tileIcon}</span> : <BoardGlyph size={30} />}
         {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={12} /></div>}
       </div>
-      {editTitle === null ? (
-        <div className="board-title" dir={dirAttr(elementDir(element))} onDoubleClick={(e) => { e.stopPropagation(); if (!isAlias) setEditTitle(title); }}>{title}</div>
-      ) : (
-        <input
-          className="board-title-input"
-          dir={dirAttr(elementDir(element))}
-          autoFocus
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          onPointerDown={(e) => e.stopPropagation()}
-          onBlur={() => {
-            if (editTitle.trim() && editTitle !== title) {
-              void commitTransaction([updateOp(element, { content: { title: editTitle.trim() } })]);
-            }
-            setEditTitle(null);
-          }}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
-      )}
+      {titleNode}
       {statLine && <div className="board-stats">{statLine}</div>}
     </div>
   );

@@ -14,12 +14,13 @@ import { ShareDialog } from './components/panels/ShareDialog';
 import { PasswordGate } from './components/panels/PasswordGate';
 import { ErrorBoundary, Toaster } from './components/ui/Toaster';
 import { PromptHost } from './components/ui/Prompt';
+import { BoardStylePopoverHost } from './components/ui/BoardStylePopover';
 import { ContextMenuHost } from './components/ui/ContextMenu';
 import { LabelPopoverHost } from './components/ui/LabelPopover';
 import { BoardsDrawer } from './components/panels/BoardsDrawer';
 import { TemplatePicker } from './components/panels/TemplatePicker';
 import { SettingsDialog } from './components/panels/SettingsDialog';
-import { copySelection, cutSelection, pasteAt } from './store/clipboard';
+import { copySelection, cutSelection, pasteFromClipboardData } from './store/clipboard';
 import { useLabels } from './store/labels';
 import { useSettings } from './store/settingsStore';
 
@@ -124,9 +125,6 @@ export default function App() {
         copySelection();
       } else if (mod && e.key.toLowerCase() === 'x' && !inEditor) {
         cutSelection();
-      } else if (mod && e.key.toLowerCase() === 'v' && !inEditor) {
-        const pt = useView.getState().lastPointer;
-        void pasteAt(pt.x, pt.y);
       } else if (mod && e.key.toLowerCase() === 'a' && !inEditor) {
         e.preventDefault();
         const state = useBoard.getState();
@@ -145,6 +143,21 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
+  // Native paste (Ctrl/⌘+V outside editors): the ClipboardEvent hands us
+  // files and text without permission prompts — screenshots and copied
+  // photos become IMAGE cards at the last pointer position.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const inEditor = (e.target as HTMLElement)?.closest?.('input, textarea, [contenteditable="true"]');
+      if (inEditor || !e.clipboardData) return;
+      e.preventDefault();
+      const pt = useView.getState().lastPointer;
+      void pasteFromClipboardData(e.clipboardData, pt.x, pt.y);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
   // Global hosts render regardless of view mode.
   const hosts = (
     <>
@@ -152,6 +165,7 @@ export default function App() {
       <PromptHost />
       <ContextMenuHost />
       <LabelPopoverHost />
+      <BoardStylePopoverHost />
     </>
   );
 

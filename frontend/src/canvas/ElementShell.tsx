@@ -14,10 +14,12 @@ import { useView } from '../store/viewStore';
 import { ElementView } from '../components/elements/ElementView';
 import {
   AliasArrow, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
-  LabelIcon, LockIcon, SyncIcon, TemplateIcon, TrashIcon,
+  LabelIcon, LockIcon, PaletteIcon, RenameIcon, SyncIcon, TemplateIcon, TrashIcon,
 } from '../components/Icons';
+import { useBoardStyle } from '../components/ui/BoardStylePopover';
 import { useContextMenu } from '../components/ui/ContextMenu';
 import { LabelChips, useLabelPopover } from '../components/ui/LabelPopover';
+import { prompt } from '../components/ui/Prompt';
 import { newObjectId } from '../lib/objectId';
 
 interface Props {
@@ -239,6 +241,30 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
         ],
       }] : []),
       ...(multi ? [{ label: 'Group into column', icon: <ColumnIcon size={15} />, onClick: groupIntoColumn }] : []),
+      ...(element.type === 'BOARD' || element.type === 'ALIAS' ? [{
+        label: 'Color & icon',
+        icon: <PaletteIcon size={15} />,
+        onClick: () => {
+          // Aliases inherit the target board's look — customize the target.
+          const targetId = element.type === 'ALIAS' ? element.content?.targetBoardId : element.id;
+          if (targetId) useBoardStyle.getState().open(e.clientX, e.clientY, targetId);
+        },
+      }] : []),
+      ...(element.type === 'BOARD' ? [{
+        label: 'Rename',
+        icon: <RenameIcon size={15} />,
+        onClick: () => {
+          void (async () => {
+            const next = await prompt({
+              title: 'Rename board',
+              placeholder: 'Board name',
+              defaultValue: element.content?.title ?? '',
+              confirmLabel: 'Rename',
+            });
+            if (next?.trim()) void useBoard.getState().commitTransaction([updateOp(element, { content: { title: next.trim() } })]);
+          })();
+        },
+      }] : []),
       ...(element.type === 'BOARD' ? [{ label: 'Create shortcut', icon: <AliasArrow size={15} />, onClick: () => void createShortcut(element) }] : []),
       ...(element.type === 'BOARD' ? [{
         label: element.content?.isTemplate ? 'Remove from templates' : 'Convert to template',
@@ -285,7 +311,7 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
         </div>
       )}
       <LabelChips labelIds={element.labelIds} />
-      <ElementView element={element} navigate={navigate} viewportRef={viewportRef} />
+      <ElementView element={element} navigate={navigate} viewportRef={viewportRef} inColumn={inColumn} />
       {!inColumn && element.type !== 'BOARD' && element.type !== 'ALIAS' && (
         <div className="resize-handle" onPointerDown={onResizeStart} />
       )}

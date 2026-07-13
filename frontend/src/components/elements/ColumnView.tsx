@@ -9,6 +9,7 @@ import { createOp, updateOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
 import { ElementShell } from '../../canvas/ElementShell';
 import type { ElementViewProps } from './ElementView';
+import { statLineFor } from './cards';
 import { ChevronIcon, PlusIcon } from '../Icons';
 
 export function ColumnView({ element, navigate, viewportRef }: ElementViewProps) {
@@ -24,6 +25,14 @@ export function ColumnView({ element, navigate, viewportRef }: ElementViewProps)
   );
 
   const collapsed = !!element.content?.collapsed;
+
+  // "3 boards, 1 file" subtitle under the title, like Milanote's columns.
+  const stats: Record<string, number> = {};
+  for (const child of children) {
+    const t = child.type === 'ALIAS' ? 'BOARD' : child.type;
+    stats[t] = (stats[t] ?? 0) + 1;
+  }
+  const statLine = statLineFor(stats);
 
   const commitTitle = () => {
     if (title !== null && title !== element.content?.title) {
@@ -55,15 +64,18 @@ export function ColumnView({ element, navigate, viewportRef }: ElementViewProps)
         >
           <ChevronIcon size={13} />
         </button>
-        <input
-          className="column-title"
-          dir={dirAttr(elementDir(element))}
-          value={title ?? element.content?.title ?? ''}
-          placeholder="Column title"
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={commitTitle}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
+        <div className="column-title-wrap">
+          <input
+            className="column-title"
+            dir={dirAttr(elementDir(element))}
+            value={title ?? element.content?.title ?? ''}
+            placeholder="Column title"
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          />
+          {statLine && <div className="column-stats">{statLine}</div>}
+        </div>
         <span className="column-count">{children.length}</span>
       </div>
       {!collapsed && (

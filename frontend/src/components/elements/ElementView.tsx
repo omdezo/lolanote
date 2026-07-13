@@ -14,6 +14,8 @@ export interface ElementViewProps {
   element: QElement;
   navigate: (boardId: string) => Promise<void>;
   viewportRef: React.RefObject<HTMLDivElement | null>;
+  // Inside a COLUMN some cards render a compact row variant (boards, files).
+  inColumn?: boolean;
 }
 
 export function ElementView(props: ElementViewProps) {
