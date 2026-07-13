@@ -5,7 +5,9 @@
 import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { api, uploadFile } from '../api/client';
+import { t } from '../i18n';
 import { createOp, useBoard } from '../store/boardStore';
+import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { prompt } from './ui/Prompt';
 import {
@@ -17,6 +19,10 @@ import {
 export function Toolbar() {
   const { boardId, commitTransaction } = useBoard();
   const { lineMode, setLineMode, drawMode, setDrawMode } = useView();
+  // Settings → Toolbar options decides which tools render; subscribing to
+  // the settings slice also keeps the t() labels live on language change.
+  const hiddenTools = useSettings((s) => s.settings.toolbar.hiddenTools);
+  const hidden = new Set(hiddenTools);
   const fileInput = useRef<HTMLInputElement>(null);
   const anyFileInput = useRef<HTMLInputElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -127,74 +133,82 @@ export function Toolbar() {
       : null;
 
   const mainTools = [
-    { icon: <NoteIcon />, label: 'Note', onClick: () => add('CARD', { doc: null, textPreview: '' }, 300, true) },
-    { icon: <LinkIcon />, label: 'Link', onClick: () => void addLink() },
-    { icon: <TodoIcon />, label: 'To-do', onClick: () => add('TASK_LIST', { title: '' }) },
-    { icon: <LineIcon />, label: 'Line', onClick: () => setLineMode(!lineMode), active: lineMode },
-    { icon: <BoardIcon />, label: 'Board', onClick: () => add('BOARD', { title: 'New board' }) },
-    { icon: <ColumnIcon />, label: 'Column', onClick: () => add('COLUMN', { title: '', collapsed: false }) },
-    { icon: <CommentIcon />, label: 'Comment', onClick: () => add('COMMENT_THREAD', {}) },
-    { icon: <TableIcon />, label: 'Table', onClick: () => add('TABLE', { cells: [['', '', ''], ['', '', ''], ['', '', '']] }, 300) },
-  ];
+    { id: 'note', icon: <NoteIcon />, label: t('tool.note'), onClick: () => add('CARD', { doc: null, textPreview: '' }, 300, true) },
+    { id: 'link', icon: <LinkIcon />, label: t('tool.link'), onClick: () => void addLink() },
+    { id: 'todo', icon: <TodoIcon />, label: t('tool.todo'), onClick: () => add('TASK_LIST', { title: '' }) },
+    { id: 'line', icon: <LineIcon />, label: t('tool.line'), onClick: () => setLineMode(!lineMode), active: lineMode },
+    { id: 'board', icon: <BoardIcon />, label: t('tool.board'), onClick: () => add('BOARD', { title: 'New board' }) },
+    { id: 'column', icon: <ColumnIcon />, label: t('tool.column'), onClick: () => add('COLUMN', { title: '', collapsed: false }) },
+    { id: 'comment', icon: <CommentIcon />, label: t('tool.comment'), onClick: () => add('COMMENT_THREAD', {}) },
+    { id: 'table', icon: <TableIcon />, label: t('tool.table'), onClick: () => add('TABLE', { cells: [['', '', ''], ['', '', ''], ['', '', '']] }, 300) },
+  ].filter((tool) => !hidden.has(tool.id));
 
   const moreTools = [
-    { icon: <SketchIcon size={17} />, bg: 'linear-gradient(135deg,#8e8ef5,#5e5ce6)', label: 'Sketch', onClick: () => add('SKETCH', { strokes: [], canvasW: 260, canvasH: 180 }, 260) },
-    { icon: <ColorIcon size={17} />, bg: 'linear-gradient(135deg,#ff6482,#e64980)', label: 'Color', onClick: () => add('COLOR_SWATCH', { hex: nextSwatch(), displayFormat: 'HEX' }) },
-    { icon: <DocumentIcon size={17} />, bg: 'linear-gradient(135deg,#34c1e0,#2193b0)', label: 'Document', onClick: () => add('DOCUMENT', { title: 'Untitled document', doc: null, textPreview: '' }) },
-    { icon: <AudioIcon size={17} />, bg: 'linear-gradient(135deg,#4cd471,#2eb85c)', label: 'Audio', onClick: () => void addAudio() },
-    { icon: <MapIcon size={17} />, bg: 'linear-gradient(135deg,#ffa94d,#f76707)', label: 'Map', onClick: () => addMap() },
-    { icon: <VideoIcon size={17} />, bg: 'linear-gradient(135deg,#748ffc,#4263eb)', label: 'Video', onClick: () => void addVideo() },
-    { icon: <HeadingIcon size={17} />, bg: 'linear-gradient(135deg,#495057,#212529)', label: 'Heading', onClick: () => add('CARD', { doc: emptyDoc(), textPreview: '', variant: 'heading' }, 340, true) },
-  ];
+    { id: 'sketch', icon: <SketchIcon size={17} />, bg: 'linear-gradient(135deg,#8e8ef5,#5e5ce6)', label: t('tool.sketch'), onClick: () => add('SKETCH', { strokes: [], canvasW: 260, canvasH: 180 }, 260) },
+    { id: 'color', icon: <ColorIcon size={17} />, bg: 'linear-gradient(135deg,#ff6482,#e64980)', label: t('tool.color'), onClick: () => add('COLOR_SWATCH', { hex: nextSwatch(), displayFormat: 'HEX' }) },
+    { id: 'document', icon: <DocumentIcon size={17} />, bg: 'linear-gradient(135deg,#34c1e0,#2193b0)', label: t('tool.document'), onClick: () => add('DOCUMENT', { title: 'Untitled document', doc: null, textPreview: '' }) },
+    { id: 'audio', icon: <AudioIcon size={17} />, bg: 'linear-gradient(135deg,#4cd471,#2eb85c)', label: t('tool.audio'), onClick: () => void addAudio() },
+    { id: 'map', icon: <MapIcon size={17} />, bg: 'linear-gradient(135deg,#ffa94d,#f76707)', label: t('tool.map'), onClick: () => addMap() },
+    { id: 'video', icon: <VideoIcon size={17} />, bg: 'linear-gradient(135deg,#748ffc,#4263eb)', label: t('tool.video'), onClick: () => void addVideo() },
+    { id: 'heading', icon: <HeadingIcon size={17} />, bg: 'linear-gradient(135deg,#495057,#212529)', label: t('tool.heading'), onClick: () => add('CARD', { doc: emptyDoc(), textPreview: '', variant: 'heading' }, 340, true) },
+  ].filter((tool) => !hidden.has(tool.id));
 
   return (
     <div className="rail" onPointerDown={(e) => e.stopPropagation()}>
-      {mainTools.map((t) => (
-        <button key={t.label} className={`rail-btn${t.active ? ' active' : ''}`} onClick={t.onClick}>
-          {t.icon}
-          <span>{t.label}</span>
+      {mainTools.map((tool) => (
+        <button key={tool.id} className={`rail-btn${tool.active ? ' active' : ''}`} onClick={tool.onClick}>
+          {tool.icon}
+          <span>{tool.label}</span>
         </button>
       ))}
 
-      <button
-        ref={moreBtnRef}
-        className={`rail-btn${moreOpen ? ' active' : ''}`}
-        onClick={(e) => {
-          setMoreTop(Math.min((e.currentTarget as HTMLElement).offsetTop - 40, window.innerHeight - 260));
-          setMoreOpen(!moreOpen);
-        }}
-      >
-        <MoreIcon />
-        <span>More</span>
-      </button>
+      {moreTools.length > 0 && (
+        <button
+          ref={moreBtnRef}
+          className={`rail-btn${moreOpen ? ' active' : ''}`}
+          onClick={(e) => {
+            setMoreTop(Math.min((e.currentTarget as HTMLElement).offsetTop - 40, window.innerHeight - 260));
+            setMoreOpen(!moreOpen);
+          }}
+        >
+          <MoreIcon />
+          <span>{t('tool.more')}</span>
+        </button>
+      )}
 
-      <button className="rail-btn" onClick={() => fileInput.current?.click()}>
-        <ImageIcon />
-        <span>Add image</span>
-      </button>
-      <button className="rail-btn" onClick={() => anyFileInput.current?.click()}>
-        <UploadIcon />
-        <span>Upload</span>
-      </button>
-      <button className={`rail-btn${drawMode ? ' active' : ''}`} onClick={() => setDrawMode(!drawMode)}>
-        <DrawIcon />
-        <span>Draw</span>
-      </button>
+      {!hidden.has('image') && (
+        <button className="rail-btn" onClick={() => fileInput.current?.click()}>
+          <ImageIcon />
+          <span>{t('tool.image')}</span>
+        </button>
+      )}
+      {!hidden.has('upload') && (
+        <button className="rail-btn" onClick={() => anyFileInput.current?.click()}>
+          <UploadIcon />
+          <span>{t('tool.upload')}</span>
+        </button>
+      )}
+      {!hidden.has('draw') && (
+        <button className={`rail-btn${drawMode ? ' active' : ''}`} onClick={() => setDrawMode(!drawMode)}>
+          <DrawIcon />
+          <span>{t('tool.draw')}</span>
+        </button>
+      )}
 
       <div className="rail-spacer" />
 
       {/* Drop a dragged card here to delete it (ElementShell checks this). */}
-      <div className="rail-btn danger-target" data-trash-drop="1" title="Drag cards here to delete">
+      <div className="rail-btn danger-target" data-trash-drop="1" title={t('tool.trashHint')}>
         <TrashIcon />
-        <span>Trash</span>
+        <span>{t('topbar.trash')}</span>
       </div>
 
       {moreOpen && (
         <div ref={flyoutRef} className="flyout" style={{ top: moreTop }}>
-          {moreTools.map((t) => (
-            <button key={t.label} className="flyout-btn" onClick={t.onClick}>
-              <div className="fly-ico" style={{ background: t.bg }}>{t.icon}</div>
-              {t.label}
+          {moreTools.map((tool) => (
+            <button key={tool.id} className="flyout-btn" onClick={tool.onClick}>
+              <div className="fly-ico" style={{ background: tool.bg }}>{tool.icon}</div>
+              {tool.label}
             </button>
           ))}
         </div>

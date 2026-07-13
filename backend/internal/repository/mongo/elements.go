@@ -257,6 +257,44 @@ func (r *ElementRepo) BoardsByShareToken(ctx context.Context, token string) ([]*
 	}}, nil)
 }
 
+// DueTaskReminders finds live TASK elements whose reminderAt has passed and
+// that were not yet notified. reminderAt is an RFC3339 UTC string, so a plain
+// lexicographic comparison is chronologically correct.
+func (r *ElementRepo) DueTaskReminders(ctx context.Context, now time.Time, limit int) ([]*domain.Element, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := bson.M{
+		"type":                 domain.TypeTask,
+		"deletedAt":            nil,
+		"content.done":         bson.M{"$ne": true},
+		"content.reminderSent": bson.M{"$ne": true},
+		"content.reminderAt": bson.M{
+			"$gt":  "",
+			"$lte": now.UTC().Format(time.RFC3339),
+		},
+	}
+	return r.find(ctx, q, options.Find().SetLimit(int64(limit)))
+}
+
+// OwnedBoards lists boards whose ACL owner is sub (account purge needs the
+// trashed ones too, hence includeDeleted).
+func (r *ElementRepo) OwnedBoards(ctx context.Context, sub string, includeDeleted bool) ([]*domain.Element, error) {
+	q := bson.M{"type": domain.TypeBoard, "acl.ownerId": sub}
+	if !includeDeleted {
+		q["deletedAt"] = nil
+	}
+	return r.find(ctx, q, nil)
+}
+
+// RemoveEditorEverywhere pulls a departing user out of every board ACL.
+func (r *ElementRepo) RemoveEditorEverywhere(ctx context.Context, sub string) error {
+	_, err := r.col.UpdateMany(ctx,
+		bson.M{"type": domain.TypeBoard, "acl.editors": sub},
+		bson.M{"$pull": bson.M{"acl.editors": sub}})
+	return err
+}
+
 // CountsByParent groups live children by parent and type in one aggregation.
 func (r *ElementRepo) CountsByParent(ctx context.Context, parentIDs []string) (map[string]map[domain.ElementType]int64, error) {
 	out := map[string]map[domain.ElementType]int64{}

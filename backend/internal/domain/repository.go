@@ -48,6 +48,14 @@ type ElementRepository interface {
 	BoardsOwnedBy(ctx context.Context, sub string, templatesOnly bool) ([]*Element, error)
 	// BoardsByShareToken finds boards whose edit or view link carries the token.
 	BoardsByShareToken(ctx context.Context, token string) ([]*Element, error)
+	// DueTaskReminders lists live TASK elements whose content.reminderAt
+	// (RFC3339 UTC string) has passed and that have not been notified yet.
+	DueTaskReminders(ctx context.Context, now time.Time, limit int) ([]*Element, error)
+	// OwnedBoards lists every BOARD whose ACL owner is sub, optionally
+	// including trashed ones — account deletion purges these trees.
+	OwnedBoards(ctx context.Context, sub string, includeDeleted bool) ([]*Element, error)
+	// RemoveEditorEverywhere strips a departing user from every board ACL.
+	RemoveEditorEverywhere(ctx context.Context, sub string) error
 	// CountsByParent aggregates live child counts per parent, per type —
 	// feeds the "N boards, N cards, N files" board-tile subtitles.
 	CountsByParent(ctx context.Context, parentIDs []string) (map[string]map[ElementType]int64, error)
@@ -66,6 +74,11 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Insert(ctx context.Context, u *User) error
 	Update(ctx context.Context, u *User) error
+	// UpdateSettings persists the (already normalized) settings document.
+	UpdateSettings(ctx context.Context, sub string, s *UserSettings) error
+	// Delete removes the account row (account deletion — the caller purges
+	// the user's content first).
+	Delete(ctx context.Context, sub string) error
 }
 
 // CommentRepository persists thread messages.
@@ -83,6 +96,7 @@ type LabelRepository interface {
 	ListByOwner(ctx context.Context, ownerSub string) ([]*Label, error)
 	Update(ctx context.Context, l *Label) error
 	Delete(ctx context.Context, id string) error
+	DeleteByOwner(ctx context.Context, ownerSub string) error
 	IncrementUsage(ctx context.Context, id string, delta int64) error
 }
 
@@ -95,6 +109,7 @@ type AttachmentRepository interface {
 	// before the cutoff — abandoned uploads to garbage-collect.
 	StalePresigned(ctx context.Context, olderThan time.Time) ([]*Attachment, error)
 	Delete(ctx context.Context, id string) error
+	DeleteByOwner(ctx context.Context, ownerSub string) error
 }
 
 // NotificationRepository persists in-app notifications.
@@ -102,11 +117,26 @@ type NotificationRepository interface {
 	Insert(ctx context.Context, n *Notification) error
 	ListByUser(ctx context.Context, sub string, unreadOnly bool, limit int) ([]*Notification, error)
 	MarkRead(ctx context.Context, sub string, ids []string) error
+	DeleteByUser(ctx context.Context, sub string) error
 }
 
 // IdentityProvider looks identities up in the auth server (Keycloak).
 type IdentityProvider interface {
 	FindUserByEmail(ctx context.Context, email string) (sub, displayName string, err error)
+}
+
+// AccountManager mutates identities in the auth server (Keycloak Admin API).
+// Optional: nil when the admin client lacks credentials — profile changes then
+// apply to the local mirror only and password changes are unavailable.
+type AccountManager interface {
+	// UpdateProfile changes the stored name/email. Empty fields are left as-is.
+	UpdateProfile(ctx context.Context, sub, firstName, lastName, email string) error
+	// VerifyPassword checks the user's current password (via a direct grant).
+	VerifyPassword(ctx context.Context, usernameOrEmail, password string) error
+	// SetPassword replaces the user's password (non-temporary).
+	SetPassword(ctx context.Context, sub, newPassword string) error
+	// DeleteUser removes the identity permanently.
+	DeleteUser(ctx context.Context, sub string) error
 }
 
 // Presigner abstracts object storage (Cloudflare R2 or the local dev driver).

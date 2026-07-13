@@ -83,6 +83,31 @@ make dev-web    # Vite dev server on :5173 (proxies /api and /ws)
 | Share | topbar **Share** (owner only) — editors, edit links, read-only links |
 | Export | topbar ⬇ — Markdown/plain-text linearization |
 | Trash | topbar 🗑 — restore, delete forever, empty |
+| Due dates & reminders | task row 📅 — pick a due date and a reminder time; reminders arrive as notifications |
+| Settings | avatar menu → **Settings** — account, notifications, appearance, preferences, localization, toolbar, privacy |
+
+## Settings
+
+The avatar menu (top-right) opens the settings dialog — every change saves
+automatically and syncs to your account:
+
+- **Account settings** — change your name, email, and password (all written
+  through to Keycloak), see your plan, and delete your account (danger zone;
+  purges every board you own plus the Keycloak identity).
+- **Emails & notifications** — per-kind switches (mentions, comments,
+  sharing, task assignments, reminders, board activity) enforced server-side
+  at notification creation; email delivery + digest cadence stored for the
+  SMTP extension point.
+- **Appearance** — light/dark/system theme, nine accent colors, canvas dot
+  grid, card shadows, comfortable/compact density.
+- **Preferences** — what double-click creates (note/board/nothing), wheel
+  scrolls vs zooms, snap-to-grid (20 px), spell check, canvas hints.
+- **Localization** — English/العربية live UI language, first day of week,
+  date format, 12/24-hour time.
+- **Toolbar options** — show/hide any of the 18 tools in the left rail.
+- **Privacy** — presence visibility (invisible mode hides you from presence,
+  cursors, and editing indicators), email visibility, and **Download my
+  data** (full JSON export of everything you own).
 
 ## Switching file storage to Cloudflare R2
 

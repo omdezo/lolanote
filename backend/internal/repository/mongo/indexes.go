@@ -25,6 +25,8 @@ func (s *Store) EnsureIndexes(ctx context.Context) error {
 				{Key: "content.title", Value: "text"},
 				{Key: "content.filename", Value: "text"},
 			}},
+			// Reminder sweep: due, un-notified tasks.
+			{Keys: bson.D{{Key: "type", Value: 1}, {Key: "content.reminderAt", Value: 1}}, Options: options.Index().SetSparse(true)},
 		},
 		colTransactions: {
 			{Keys: bson.D{{Key: "boardId", Value: 1}, {Key: "createdAt", Value: -1}}},

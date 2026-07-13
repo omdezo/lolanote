@@ -18,9 +18,14 @@ type TransactionService struct {
 	transactions domain.TransactionRepository
 	access       *AccessResolver
 	broadcaster  domain.TransactionBroadcaster
+	notifier     *Notifier // optional: task-assignment notifications
 	newID        IDGenerator
 	log          *zap.Logger
 }
+
+// AttachNotifier enables assignment notifications on the write path. Optional
+// so tests and minimal wiring can skip it.
+func (s *TransactionService) AttachNotifier(n *Notifier) { s.notifier = n }
 
 // NewTransactionService constructs the service.
 func NewTransactionService(
@@ -88,7 +93,43 @@ func (s *TransactionService) Apply(ctx context.Context, p *domain.Principal, boa
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastTransaction(boardID, txn)
 	}
+	s.notifyAssignments(ctx, p, boardID, ops)
 	return txn, nil
+}
+
+// notifyAssignments tells users when a task gets assigned to them (§4.11).
+// Assignment arrives as content.assigneeId inside create/update ops.
+func (s *TransactionService) notifyAssignments(ctx context.Context, p *domain.Principal, boardID string, ops []domain.Op) {
+	if s.notifier == nil {
+		return
+	}
+	for i := range ops {
+		op := &ops[i]
+		if op.Action != domain.ActionCreate && op.Action != domain.ActionUpdate {
+			continue
+		}
+		content, ok := op.Changes["content"].(map[string]any)
+		if !ok {
+			continue
+		}
+		assignee, _ := content["assigneeId"].(string)
+		if assignee == "" || assignee == p.Sub {
+			continue // unassigned, cleared, or self-assignment
+		}
+		text := ""
+		if el, err := s.elements.Get(ctx, op.ElementID); err == nil {
+			if el.Type != domain.TypeTask {
+				continue
+			}
+			text, _ = el.Content["text"].(string)
+		}
+		s.notifier.Notify(ctx, &domain.Notification{
+			ID: s.newID(), UserID: assignee, Kind: domain.NotifyAssignment,
+			ActorID: p.Sub, BoardID: boardID, ElementID: op.ElementID,
+			Message: p.Name + " assigned you a task: \"" + text + "\"",
+			CreatedAt: time.Now().UTC(),
+		})
+	}
 }
 
 // verifyOpScope confirms an op targets the declared board's subtree. "Within"

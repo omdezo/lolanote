@@ -17,15 +17,15 @@ import (
 // Permissions cascade to nested sub-boards automatically because access
 // resolution walks ancestors (see AccessResolver).
 type ShareService struct {
-	elements      domain.ElementRepository
-	users         *UserService
-	notifications domain.NotificationRepository
-	access        *AccessResolver
+	elements domain.ElementRepository
+	users    *UserService
+	notifier *Notifier
+	access   *AccessResolver
 }
 
 // NewShareService constructs the service.
-func NewShareService(elements domain.ElementRepository, users *UserService, notifications domain.NotificationRepository, access *AccessResolver) *ShareService {
-	return &ShareService{elements: elements, users: users, notifications: notifications, access: access}
+func NewShareService(elements domain.ElementRepository, users *UserService, notifier *Notifier, access *AccessResolver) *ShareService {
+	return &ShareService{elements: elements, users: users, notifier: notifier, access: access}
 }
 
 // ShareState is what the Share dialog renders.
@@ -92,7 +92,7 @@ func (s *ShareService) InviteEditor(ctx context.Context, p *domain.Principal, bo
 	if err := s.elements.SetACL(ctx, boardID, board.ACL); err != nil {
 		return nil, err
 	}
-	_ = s.notifications.Insert(ctx, &domain.Notification{
+	s.notifier.Notify(ctx, &domain.Notification{
 		ID: newToken(12), UserID: sub, Kind: domain.NotifyShare, ActorID: p.Sub,
 		BoardID: boardID, Message: p.Name + " shared \"" + board.Title() + "\" with you",
 		CreatedAt: time.Now().UTC(),

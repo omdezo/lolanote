@@ -21,6 +21,7 @@ import (
 // bind → call service → shape response.
 type Handlers struct {
 	Users         *service.UserService
+	Account       *service.AccountService
 	Boards        *service.BoardService
 	Elements      *service.ElementService
 	Txns          *service.TransactionService
@@ -215,11 +216,19 @@ func (h *Handlers) WebSocket(c echo.Context) error {
 	if _, _, err := h.Access.RequireView(ctx, boardID, p); err != nil {
 		return err
 	}
+	// Privacy: users who turned presence off join invisibly — they receive
+	// every broadcast but never appear in presence, cursors, or editing.
+	invisible := false
+	if p.Sub != "" && h.Account != nil {
+		if settings, err := h.Account.Settings(ctx, p); err == nil {
+			invisible = !settings.Privacy.ShowPresence
+		}
+	}
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err
 	}
-	realtime.NewClient(h.Hub, conn, clientID, boardID, p)
+	realtime.NewClient(h.Hub, conn, clientID, boardID, p, invisible)
 	return nil
 }
 

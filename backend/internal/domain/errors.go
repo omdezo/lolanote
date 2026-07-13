@@ -11,4 +11,7 @@ var (
 	ErrConflict     = errors.New("conflict")
 	ErrValidation   = errors.New("validation failed")
 	ErrHomeBoard    = errors.New("the home board cannot be shared, moved, or deleted")
+	// ErrUnavailable marks features that need server-side configuration the
+	// deployment lacks (e.g. password changes without a Keycloak admin client).
+	ErrUnavailable = errors.New("feature not available on this server")
 )

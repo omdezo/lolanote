@@ -19,7 +19,7 @@
       "publicClient": true,
       "protocol": "openid-connect",
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:5173/*",
         "http://localhost:3000/*"
@@ -59,7 +59,7 @@
       "enabled": true,
       "serviceAccountClientId": "qomranote-api",
       "clientRoles": {
-        "realm-management": ["view-users", "query-users"]
+        "realm-management": ["view-users", "query-users", "manage-users"]
       }
     }
   ]

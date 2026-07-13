@@ -159,6 +159,8 @@ func errorHandler(log *zap.Logger) echo.HTTPErrorHandler {
 			status, message = http.StatusBadRequest, domain.ErrHomeBoard.Error()
 		case errors.Is(err, domain.ErrValidation):
 			status, message = http.StatusBadRequest, err.Error()
+		case errors.Is(err, domain.ErrUnavailable):
+			status, message = http.StatusNotImplemented, domain.ErrUnavailable.Error()
 		default:
 			log.Error("unhandled error", zap.Error(err), zap.String("path", c.Request().URL.Path))
 		}

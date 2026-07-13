@@ -7,6 +7,7 @@ import gsap from 'gsap';
 import type { QElement } from '../api/types';
 import { api } from '../api/client';
 import { createOp, deleteOp, moveOp, updateOp, useBoard } from '../store/boardStore';
+import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementView } from '../components/elements/ElementView';
 import { AliasArrow, ColumnIcon, DuplicateIcon, LabelIcon, LockIcon, SyncIcon, TemplateIcon, TrashIcon } from '../components/Icons';
@@ -138,14 +139,16 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
       }
 
       // Dropping onto open canvas: reparent out of any column to the board,
-      // translated by the drag delta.
+      // translated by the drag delta. Preference: snap to a 20px grid.
+      const { snapToGrid } = useSettings.getState().settings.preferences;
+      const snap = (v: number) => (snapToGrid ? Math.round(v / 20) * 20 : v);
       const ops = dragged.map((el) => {
         const leavingColumn = el.location.parentId !== state.boardId && el.type !== 'LINE';
         if (leavingColumn) {
           const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, document.querySelector('.canvas-viewport') as HTMLElement);
-          return moveOp(el, { parentId: state.boardId, section: 'CANVAS', position: { x: pt.x - 130, y: pt.y - 30 } });
+          return moveOp(el, { parentId: state.boardId, section: 'CANVAS', position: { x: snap(pt.x - 130), y: snap(pt.y - 30) } });
         }
-        return moveOp(el, { position: { x: el.location.position.x + d.dx, y: el.location.position.y + d.dy } });
+        return moveOp(el, { position: { x: snap(el.location.position.x + d.dx), y: snap(el.location.position.y + d.dy) } });
       });
       void state.commitTransaction(ops);
     };

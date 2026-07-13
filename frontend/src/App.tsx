@@ -18,10 +18,12 @@ import { ContextMenuHost } from './components/ui/ContextMenu';
 import { LabelPopoverHost } from './components/ui/LabelPopover';
 import { BoardsDrawer } from './components/panels/BoardsDrawer';
 import { TemplatePicker } from './components/panels/TemplatePicker';
+import { SettingsDialog } from './components/panels/SettingsDialog';
 import { copySelection, cutSelection, pasteAt } from './store/clipboard';
 import { useLabels } from './store/labels';
+import { useSettings } from './store/settingsStore';
 
-export type PanelKind = 'none' | 'unsorted' | 'trash' | 'search' | 'share' | 'boards' | 'templates';
+export type PanelKind = 'none' | 'unsorted' | 'trash' | 'search' | 'share' | 'boards' | 'templates' | 'settings';
 
 export default function App() {
   const [booted, setBooted] = useState(false);
@@ -31,6 +33,7 @@ export default function App() {
   const [welcome, setWelcome] = useState('');
   const { setUser, openBoard, readOnly, undo, redo } = useBoard();
   const boardId = useBoard((s) => s.boardId);
+  const spellCheck = useSettings((s) => s.settings.preferences.spellCheck);
 
   // Open a shared board via its token; handle password-gated links.
   const openShared = useCallback(async (token: string, board: string, password?: string) => {
@@ -42,7 +45,11 @@ export default function App() {
       const target = resolved.boardId || board;
       // Logged-in editors get the full editor; everyone else, read-only.
       if (isAuthenticated()) {
-        try { setUser(await api.me()); } catch { /* editor bootstrap optional */ }
+        try {
+          const me = await api.me();
+          setUser(me);
+          useSettings.getState().hydrate(me);
+        } catch { /* editor bootstrap optional */ }
       }
       setPublicView(!isAuthenticated() || resolved.kind === 'view');
       await openBoard(target);
@@ -79,6 +86,7 @@ export default function App() {
       const me = await api.me();
       if (cancelled) return;
       setUser(me);
+      useSettings.getState().hydrate(me);
       void useLabels.getState().load();
       await openBoard(me.homeBoardId);
       await connectBoard(me.homeBoardId);
@@ -193,7 +201,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="app">
+      <div className="app" spellCheck={spellCheck}>
         <Topbar navigate={navigate} panel={panel} setPanel={setPanel} />
         <div className="workspace">
           {!readOnly && <Toolbar />}
@@ -206,6 +214,7 @@ export default function App() {
           {panel === 'search' && <SearchOverlay onClose={() => setPanel('none')} navigate={navigate} />}
           {panel === 'share' && boardId && <ShareDialog boardId={boardId} onClose={() => setPanel('none')} />}
           {panel === 'templates' && <TemplatePicker onClose={() => setPanel('none')} />}
+          {panel === 'settings' && <SettingsDialog onClose={() => setPanel('none')} />}
         </div>
       </div>
       {hosts}

@@ -28,6 +28,7 @@ type Config struct {
 	KeycloakRealm        string `mapstructure:"KEYCLOAK_REALM"`
 	KeycloakAdminClient  string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_ID"`
 	KeycloakAdminSecret  string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_SECRET"`
+	KeycloakWebClient    string `mapstructure:"KEYCLOAK_WEB_CLIENT_ID"` // public client used to verify current passwords
 
 	// Object storage: "local" (dev fallback, files served by the API) or "r2"
 	// (Cloudflare R2 via its S3-compatible API, presigned direct uploads).
@@ -61,6 +62,7 @@ func Load() (*Config, error) {
 		"KEYCLOAK_REALM":         "qomranote",
 		"KEYCLOAK_ADMIN_CLIENT_ID":     "qomranote-api",
 		"KEYCLOAK_ADMIN_CLIENT_SECRET": "",
+		"KEYCLOAK_WEB_CLIENT_ID":       "qomranote-web",
 		"STORAGE_DRIVER":         "local",
 		"LOCAL_STORAGE_DIR":      "./data/uploads",
 		"PUBLIC_API_BASE":        "http://localhost:8080",

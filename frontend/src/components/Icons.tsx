@@ -178,3 +178,36 @@ export const H2Icon = (p: P) => (
 export const EmptyTrayIllustration = (p: P) => (
   <svg {...base({ size: 56, strokeWidth: 1.2, ...p } as P)}><path d="M4.5 13.5 7 6.5a1.5 1.5 0 0 1 1.4-1h7.2a1.5 1.5 0 0 1 1.4 1l2.5 7" opacity="0.5" /><path d="M4.5 13.5h4.2c.5 0 .9.3 1.1.7l.4.8c.2.4.6.7 1.1.7h1.4c.5 0 .9-.3 1.1-.7l.4-.8c.2-.4.6-.7 1.1-.7h4.2V17a2.3 2.3 0 0 1-2.3 2.3H6.8A2.3 2.3 0 0 1 4.5 17v-3.5Z" opacity="0.5" /></svg>
 );
+export const SettingsIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="3.1" /><path d="M12 4.2v2M12 17.8v2M19.8 12h-2M6.2 12h-2M17.5 6.5l-1.4 1.4M7.9 16.1l-1.4 1.4M17.5 17.5l-1.4-1.4M7.9 7.9 6.5 6.5" /></svg>
+);
+export const UserIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="8.4" r="3.4" /><path d="M5.2 19.5c.9-3 3.6-4.7 6.8-4.7s5.9 1.7 6.8 4.7" /></svg>
+);
+export const PaletteIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4.5a7.5 7.5 0 0 0 0 15h1.2a1.8 1.8 0 0 0 1.4-3 1.8 1.8 0 0 1 1.4-3h1.7a2.8 2.8 0 0 0 2.8-2.9c-.3-3.6-3.9-6.1-8.5-6.1Z" /><circle cx="8.2" cy="10" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="8.2" r="1" fill="currentColor" stroke="none" /><circle cx="15.8" cy="10" r="1" fill="currentColor" stroke="none" /><circle cx="8.5" cy="14.2" r="1" fill="currentColor" stroke="none" /></svg>
+);
+export const SlidersIcon = (p: P) => (
+  <svg {...base(p)}><path d="M5 7.3h7M16.5 7.3H19M5 12h2.5M12 12h7M5 16.7h9.5M19 16.7h0" /><circle cx="14.2" cy="7.3" r="1.9" /><circle cx="9.8" cy="12" r="1.9" /><circle cx="16.8" cy="16.7" r="1.9" /></svg>
+);
+export const GlobeIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="7.7" /><path d="M4.3 12h15.4M12 4.3c2.1 2 3.2 4.7 3.2 7.7s-1.1 5.7-3.2 7.7c-2.1-2-3.2-4.7-3.2-7.7s1.1-5.7 3.2-7.7Z" /></svg>
+);
+export const ShieldIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4.2 5.8 6.6v4.6c0 4 2.5 6.9 6.2 8.6 3.7-1.7 6.2-4.6 6.2-8.6V6.6L12 4.2Z" /><path d="m9.3 12 1.9 1.9 3.5-3.6" /></svg>
+);
+export const RailIcon = (p: P) => (
+  <svg {...base(p)}><rect x="4" y="4.5" width="16" height="15" rx="2.5" /><path d="M9.2 4.5v15" /><path d="M6.6 8h0M6.6 11h0M6.6 14h0" strokeWidth="2.1" /></svg>
+);
+export const MailIcon = (p: P) => (
+  <svg {...base(p)}><rect x="4" y="5.5" width="16" height="13" rx="2.4" /><path d="m5 7.5 7 5.5 7-5.5" /></svg>
+);
+export const CalendarIcon = (p: P) => (
+  <svg {...base(p)}><rect x="4.5" y="5.5" width="15" height="14" rx="2.4" /><path d="M4.5 9.7h15M8.6 3.8v3M15.4 3.8v3" /></svg>
+);
+export const ClockIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="7.7" /><path d="M12 8v4.3l2.8 1.7" /></svg>
+);
+export const DownloadIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4.5v10M8 11l4 4 4-4" /><path d="M5 19.5h14" /></svg>
+);

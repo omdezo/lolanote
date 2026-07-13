@@ -6,14 +6,26 @@ import "time"
 // lazily on the first authenticated request; bootstrap also creates the
 // private Home board every account is rooted at (§3.1).
 type User struct {
-	ID          string    `bson:"_id" json:"id"`
-	KeycloakSub string    `bson:"keycloakSub" json:"keycloakSub"`
-	Email       string    `bson:"email" json:"email"`
-	DisplayName string    `bson:"displayName" json:"displayName"`
-	AvatarURL   string    `bson:"avatarUrl,omitempty" json:"avatarUrl,omitempty"`
-	HomeBoardID string    `bson:"homeBoardId" json:"homeBoardId"`
-	Plan        string    `bson:"plan" json:"plan"` // free | pro
-	CreatedAt   time.Time `bson:"createdAt" json:"createdAt"`
+	ID          string        `bson:"_id" json:"id"`
+	KeycloakSub string        `bson:"keycloakSub" json:"keycloakSub"`
+	Email       string        `bson:"email" json:"email"`
+	DisplayName string        `bson:"displayName" json:"displayName"`
+	AvatarURL   string        `bson:"avatarUrl,omitempty" json:"avatarUrl,omitempty"`
+	HomeBoardID string        `bson:"homeBoardId" json:"homeBoardId"`
+	Plan        string        `bson:"plan" json:"plan"` // free | pro
+	Settings    *UserSettings `bson:"settings,omitempty" json:"settings,omitempty"`
+	CreatedAt   time.Time     `bson:"createdAt" json:"createdAt"`
+}
+
+// EffectiveSettings returns the user's settings with defaults filled in for
+// accounts created before the settings system existed.
+func (u *User) EffectiveSettings() UserSettings {
+	if u.Settings == nil {
+		return DefaultSettings()
+	}
+	s := *u.Settings
+	s.Normalize()
+	return s
 }
 
 // Comment is one message inside a COMMENT_THREAD element. Authors edit only
@@ -70,6 +82,7 @@ const (
 	NotifyComment     NotificationKind = "comment"
 	NotifyBoardChange NotificationKind = "boardChange"
 	NotifyShare       NotificationKind = "share"
+	NotifyReminder    NotificationKind = "reminder"
 )
 
 // Notification is one in-app notification row.

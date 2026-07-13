@@ -8,6 +8,7 @@ import { api, uploadFile } from '../api/client';
 import type { QElement } from '../api/types';
 import { sendCursor } from '../realtime/socket';
 import { createOp, useBoard } from '../store/boardStore';
+import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementShell } from './ElementShell';
 import { LineLayer } from './LineLayer';
@@ -54,7 +55,9 @@ export function BoardCanvas({ navigate }: Props) {
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     const rect = viewportRef.current!.getBoundingClientRect();
-    if (e.ctrlKey || e.metaKey) {
+    // Preference: plain wheel pans (default) or zooms; Ctrl/⌘ always zooms.
+    const wheelZooms = useSettings.getState().settings.preferences.wheelMode === 'zoom';
+    if (e.ctrlKey || e.metaKey || (wheelZooms && !e.shiftKey && e.deltaX === 0)) {
       applyZoom(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - rect.left, e.clientY - rect.top);
     } else {
       const v = useView.getState();
@@ -195,13 +198,15 @@ export function BoardCanvas({ navigate }: Props) {
 
   const onDoubleClick = useCallback((e: React.MouseEvent) => {
     if (e.target !== e.currentTarget || drawMode) return;
+    // Preference: double-click creates a note (default), a board, or nothing.
+    const creates = useSettings.getState().settings.preferences.doubleClickCreates;
+    if (creates === 'none') return;
     const pt = toCanvas(e.clientX, e.clientY, viewportRef.current!);
-    const op = createOp('CARD', boardId, {
-      position: { x: pt.x, y: pt.y }, width: 300,
-      content: { doc: null, textPreview: '' },
-    });
+    const op = creates === 'board'
+      ? createOp('BOARD', boardId, { position: { x: pt.x, y: pt.y }, content: { title: 'New board' } })
+      : createOp('CARD', boardId, { position: { x: pt.x, y: pt.y }, width: 300, content: { doc: null, textPreview: '' } });
     void commitTransaction([op]);
-    useView.getState().setEditing(op.elementId);
+    if (creates === 'note') useView.getState().setEditing(op.elementId);
   }, [boardId, commitTransaction, toCanvas, drawMode]);
 
   // ---- drop: OS files become IMAGE/FILE cards; URLs become link cards ----
@@ -327,7 +332,7 @@ export function BoardCanvas({ navigate }: Props) {
         <button onClick={fitAll} title="Fit all (Z)"><FitIcon size={15} /></button>
       </div>
 
-      {canvasElements.length === 0 && !drawMode && (
+      {canvasElements.length === 0 && !drawMode && useSettings.getState().settings.preferences.showHints && (
         <div className="hint-pill">Double-click anywhere to add a note · drop images to upload · Ctrl+scroll to zoom</div>
       )}
     </div>

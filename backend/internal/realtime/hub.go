@@ -66,7 +66,9 @@ func (h *Hub) Register(c *Client) {
 
 	h.log.Debug("client joined", zap.String("board", c.BoardID), zap.String("client", c.ID))
 	c.Send(mustEnvelope("presence.state", h.presence(c.BoardID)))
-	h.broadcast(c.BoardID, mustEnvelope("presence.join", c.presenceUser()), c)
+	if !c.Invisible {
+		h.broadcast(c.BoardID, mustEnvelope("presence.join", c.presenceUser()), c)
+	}
 }
 
 // Unregister removes a client, tearing the room down when empty.
@@ -125,13 +127,17 @@ func (h *Hub) broadcast(boardID string, env []byte, skip *Client) {
 	}
 }
 
-// presence snapshots everyone currently in a room.
+// presence snapshots everyone currently in a room (invisible clients are
+// omitted — privacy → ShowPresence off).
 func (h *Hub) presence(boardID string) []PresenceUser {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	out := []PresenceUser{}
 	if r, ok := h.rooms[boardID]; ok {
 		for c := range r.clients {
+			if c.Invisible {
+				continue
+			}
 			out = append(out, c.presenceUser())
 		}
 	}

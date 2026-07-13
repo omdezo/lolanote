@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { QNotification } from '../../api/types';
+import { relativeTime } from '../../i18n';
+import { useLocalization } from '../../store/settingsStore';
 import { BellIcon, CloseIcon } from '../Icons';
 
 const POLL_MS = 30_000;
@@ -11,6 +13,7 @@ export function NotificationsBell({ navigate }: { navigate: (boardId: string) =>
   const [items, setItems] = useState<QNotification[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const localization = useLocalization();
 
   const load = () => api.notifications().then(setItems).catch(() => undefined);
   useEffect(() => {
@@ -60,7 +63,7 @@ export function NotificationsBell({ navigate }: { navigate: (boardId: string) =>
             {items.map((n) => (
               <button key={n.id} className="notif-item" onClick={() => void go(n)}>
                 <div className="notif-msg">{n.message}</div>
-                <div className="notif-time">{timeAgo(n.createdAt)}</div>
+                <div className="notif-time">{relativeTime(n.createdAt, localization)}</div>
               </button>
             ))}
           </div>
@@ -68,14 +71,4 @@ export function NotificationsBell({ navigate }: { navigate: (boardId: string) =>
       )}
     </div>
   );
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
 }

@@ -32,6 +32,14 @@ func registerRoutes(e *echo.Echo, h *Handlers) {
 	api.GET("/me", h.Me)
 	api.GET("/users/lookup", h.LookupUser)
 
+	// Account & settings (the Settings dialog surface)
+	api.PATCH("/me", h.UpdateMe)
+	api.GET("/me/settings", h.GetSettings)
+	api.PATCH("/me/settings", h.UpdateSettings)
+	api.POST("/me/password", h.ChangePassword)
+	api.GET("/me/export", h.ExportMyData)
+	api.DELETE("/me", h.DeleteMe)
+
 	// Boards (authed-only reads)
 	api.GET("/boards", h.MyBoards)
 	api.GET("/boards/:id/transactions", h.BoardTransactions)

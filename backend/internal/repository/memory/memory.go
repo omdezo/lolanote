@@ -224,6 +224,57 @@ func (r *ElementRepo) BoardsOwnedBy(_ context.Context, sub string, templatesOnly
 	return out, nil
 }
 
+func (r *ElementRepo) DueTaskReminders(_ context.Context, now time.Time, limit int) ([]*domain.Element, error) {
+	var out []*domain.Element
+	cutoff := now.UTC().Format(time.RFC3339)
+	for _, el := range r.items {
+		if el.Type != domain.TypeTask || el.IsDeleted() {
+			continue
+		}
+		if done, _ := el.Content["done"].(bool); done {
+			continue
+		}
+		if sent, _ := el.Content["reminderSent"].(bool); sent {
+			continue
+		}
+		at, _ := el.Content["reminderAt"].(string)
+		if at != "" && at <= cutoff {
+			out = append(out, clone(el))
+		}
+	}
+	return out, nil
+}
+
+func (r *ElementRepo) OwnedBoards(_ context.Context, sub string, includeDeleted bool) ([]*domain.Element, error) {
+	var out []*domain.Element
+	for _, el := range r.items {
+		if el.Type != domain.TypeBoard || el.ACL == nil || el.ACL.OwnerID != sub {
+			continue
+		}
+		if !includeDeleted && el.IsDeleted() {
+			continue
+		}
+		out = append(out, clone(el))
+	}
+	return out, nil
+}
+
+func (r *ElementRepo) RemoveEditorEverywhere(_ context.Context, sub string) error {
+	for _, el := range r.items {
+		if el.Type != domain.TypeBoard || el.ACL == nil {
+			continue
+		}
+		kept := el.ACL.Editors[:0]
+		for _, e := range el.ACL.Editors {
+			if e != sub {
+				kept = append(kept, e)
+			}
+		}
+		el.ACL.Editors = kept
+	}
+	return nil
+}
+
 func (r *ElementRepo) BoardsByShareToken(_ context.Context, token string) ([]*domain.Element, error) {
 	var out []*domain.Element
 	for _, el := range r.items {

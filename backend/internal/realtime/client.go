@@ -22,6 +22,9 @@ type Client struct {
 	ID        string // client-generated uuid; matches transactions' clientId
 	BoardID   string
 	Principal *domain.Principal
+	// Invisible clients (privacy → ShowPresence off) receive every broadcast
+	// but never appear in presence lists, cursors, or editing indicators.
+	Invisible bool
 
 	hub  *Hub
 	conn *websocket.Conn
@@ -34,9 +37,9 @@ type Client struct {
 }
 
 // NewClient wires a connection into the hub and starts its pumps.
-func NewClient(hub *Hub, conn *websocket.Conn, id, boardID string, p *domain.Principal) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, id, boardID string, p *domain.Principal, invisible bool) *Client {
 	c := &Client{
-		ID: id, BoardID: boardID, Principal: p,
+		ID: id, BoardID: boardID, Principal: p, Invisible: invisible,
 		hub: hub, conn: conn, send: make(chan []byte, 64),
 	}
 	hub.Register(c)
@@ -104,6 +107,9 @@ func (c *Client) handle(env Envelope) {
 			c.mu.Lock()
 			c.cursor = &cur
 			c.mu.Unlock()
+			if c.Invisible {
+				return
+			}
 			c.hub.broadcast(c.BoardID, mustEnvelope("presence.cursor", map[string]any{
 				"clientId": c.ID, "cursor": cur,
 			}), c)
@@ -121,6 +127,9 @@ func (c *Client) handle(env Envelope) {
 				c.editing = ""
 			}
 			c.mu.Unlock()
+			if c.Invisible {
+				return
+			}
 			c.hub.broadcast(c.BoardID, mustEnvelope("element.editing", map[string]any{
 				"clientId": c.ID, "sub": c.Principal.Sub, "elementId": payload.ElementID, "on": payload.On,
 			}), c)

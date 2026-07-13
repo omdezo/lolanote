@@ -81,6 +81,7 @@ services:
       KEYCLOAK_REALM: qomranote
       KEYCLOAK_ADMIN_CLIENT_ID: qomranote-api
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-qomranote-api-secret-change-me}
+      KEYCLOAK_WEB_CLIENT_ID: qomranote-web
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       LOCAL_STORAGE_DIR: /app/data/uploads
       PUBLIC_API_BASE: ${PUBLIC_API_BASE:-http://localhost:8080}

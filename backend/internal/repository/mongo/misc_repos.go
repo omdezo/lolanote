@@ -82,6 +82,20 @@ func (r *UserRepo) Update(ctx context.Context, u *domain.User) error {
 	return err
 }
 
+func (r *UserRepo) UpdateSettings(ctx context.Context, sub string, s *domain.UserSettings) error {
+	res, err := r.col.UpdateOne(ctx, bson.M{"keycloakSub": sub},
+		bson.M{"$set": bson.M{"settings": s}})
+	if err == nil && res.MatchedCount == 0 {
+		return domain.ErrNotFound
+	}
+	return err
+}
+
+func (r *UserRepo) Delete(ctx context.Context, sub string) error {
+	_, err := r.col.DeleteOne(ctx, bson.M{"keycloakSub": sub})
+	return err
+}
+
 // ---- comments ---------------------------------------------------------------
 
 type CommentRepo struct{ col *mongo.Collection }
@@ -169,6 +183,11 @@ func (r *LabelRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *LabelRepo) DeleteByOwner(ctx context.Context, ownerSub string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"ownerId": ownerSub})
+	return err
+}
+
 func (r *LabelRepo) IncrementUsage(ctx context.Context, id string, delta int64) error {
 	_, err := r.col.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$inc": bson.M{"usageCount": delta}})
 	return err
@@ -224,6 +243,11 @@ func (r *AttachmentRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *AttachmentRepo) DeleteByOwner(ctx context.Context, ownerSub string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"ownerId": ownerSub})
+	return err
+}
+
 // ---- notifications ---------------------------------------------------------------
 
 type NotificationRepo struct{ col *mongo.Collection }
@@ -266,5 +290,10 @@ func (r *NotificationRepo) MarkRead(ctx context.Context, sub string, ids []strin
 		q["_id"] = bson.M{"$in": ids}
 	}
 	_, err := r.col.UpdateMany(ctx, q, bson.M{"$set": bson.M{"read": true}})
+	return err
+}
+
+func (r *NotificationRepo) DeleteByUser(ctx context.Context, sub string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"userId": sub})
 	return err
 }

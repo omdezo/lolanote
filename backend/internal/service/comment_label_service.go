@@ -13,15 +13,15 @@ import (
 // comments, and comments cannot be removed from a thread once posted.
 
 type CommentService struct {
-	comments      domain.CommentRepository
-	elements      domain.ElementRepository
-	notifications domain.NotificationRepository
-	access        *AccessResolver
-	newID         IDGenerator
+	comments domain.CommentRepository
+	elements domain.ElementRepository
+	notifier *Notifier
+	access   *AccessResolver
+	newID    IDGenerator
 }
 
-func NewCommentService(comments domain.CommentRepository, elements domain.ElementRepository, notifications domain.NotificationRepository, access *AccessResolver, newID IDGenerator) *CommentService {
-	return &CommentService{comments: comments, elements: elements, notifications: notifications, access: access, newID: newID}
+func NewCommentService(comments domain.CommentRepository, elements domain.ElementRepository, notifier *Notifier, access *AccessResolver, newID IDGenerator) *CommentService {
+	return &CommentService{comments: comments, elements: elements, notifier: notifier, access: access, newID: newID}
 }
 
 // List returns a thread's messages after a view check.
@@ -52,9 +52,10 @@ func (s *CommentService) Add(ctx context.Context, p *domain.Principal, threadID,
 	if err := s.comments.Insert(ctx, c); err != nil {
 		return nil, err
 	}
-	// Notify the board owner about new feedback (skip self-comments).
+	// Notify the board owner about new feedback (skip self-comments); the
+	// notifier drops it when the owner muted comment notifications.
 	if board.ACL != nil && board.ACL.OwnerID != p.Sub {
-		_ = s.notifications.Insert(ctx, &domain.Notification{
+		s.notifier.Notify(ctx, &domain.Notification{
 			ID: s.newID(), UserID: board.ACL.OwnerID, Kind: domain.NotifyComment,
 			ActorID: p.Sub, BoardID: board.ID, ElementID: threadID,
 			Message: p.Name + " commented on \"" + board.Title() + "\"",

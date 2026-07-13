@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -55,8 +56,10 @@ var serveCmd = &cobra.Command{
 			return err
 		}
 		var identity domain.IdentityProvider
+		var accounts domain.AccountManager
 		if cfg.KeycloakAdminSecret != "" {
-			identity = auth.NewKeycloakIdentityProvider(cfg)
+			kc := auth.NewKeycloakIdentityProvider(cfg)
+			identity, accounts = kc, kc
 		}
 		tickets := auth.NewTicketStore()
 		log.Info("keycloak verifier ready", zap.String("issuer", cfg.KeycloakIssuer))
@@ -84,18 +87,25 @@ var serveCmd = &cobra.Command{
 		access := service.NewAccessResolver(elements)
 		newID := service.IDGenerator(repo.NewID)
 
+		notifier := service.NewNotifier(notifications, users)
 		userSvc := service.NewUserService(users, elements, identity, newID)
+		accountSvc := service.NewAccountService(users, elements, labels, attachments, notifications, accounts, log)
 		txnSvc := service.NewTransactionService(elements, transactions, access, hub, newID, log)
+		txnSvc.AttachNotifier(notifier)
 		elementSvc := service.NewElementService(elements, access, newID)
 		boardSvc := service.NewBoardService(elements, users, access)
-		shareSvc := service.NewShareService(elements, userSvc, notifications, access)
+		shareSvc := service.NewShareService(elements, userSvc, notifier, access)
 		uploadSvc := service.NewUploadService(attachments, presigner, newID)
 		linkSvc := service.NewLinkService()
-		commentSvc := service.NewCommentService(comments, elements, notifications, access, newID)
+		commentSvc := service.NewCommentService(comments, elements, notifier, access, newID)
 		labelSvc := service.NewLabelService(labels, elements, access, newID)
 
+		// Background sweep: due task reminders become notifications (§4.11).
+		reminderSvc := service.NewReminderService(elements, access, notifier, newID, log)
+		go reminderSvc.Run(ctx, time.Minute)
+
 		handlers := &httptransport.Handlers{
-			Users: userSvc, Boards: boardSvc, Elements: elementSvc,
+			Users: userSvc, Account: accountSvc, Boards: boardSvc, Elements: elementSvc,
 			Txns: txnSvc, Share: shareSvc, Uploads: uploadSvc,
 			Links: linkSvc, Comments: commentSvc, Labels: labelSvc,
 			Notifications: notifications, Access: access,

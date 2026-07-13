@@ -3,8 +3,11 @@
 import { getToken } from '../auth/keycloak';
 import type {
   BoardView, Label, LinkMetadata, Op, PresignResult, QComment, QElement,
-  QNotification, ShareState, TrashItem, Txn, User,
+  QNotification, ShareState, TrashItem, Txn, User, UserSettings,
 } from './types';
+
+// DeepPartial lets settings patches carry only the fields that changed.
+export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
 const BASE = '/api/v1';
 
@@ -47,6 +50,14 @@ export class ApiError extends Error {
 
 export const api = {
   me: () => request<User>('GET', '/me'),
+  updateMe: (patch: { displayName?: string; email?: string; avatarUrl?: string }) =>
+    request<User>('PATCH', '/me', patch),
+  settings: () => request<UserSettings>('GET', '/me/settings'),
+  updateSettings: (patch: DeepPartial<UserSettings>) =>
+    request<UserSettings>('PATCH', '/me/settings', patch),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('POST', '/me/password', { currentPassword, newPassword }),
+  deleteAccount: () => request<void>('DELETE', '/me', { confirm: 'DELETE' }),
   realtimeTicket: () => request<{ ticket: string }>('POST', '/realtime/ticket'),
 
   board: (id: string) => request<BoardView>('GET', `/boards/${id}`),
@@ -108,6 +119,15 @@ export const api = {
   notifications: () => request<QNotification[]>('GET', '/notifications'),
   markNotificationsRead: (ids: string[]) => request<void>('POST', '/notifications/read', { ids }),
 };
+
+// exportMyDataBlob downloads the caller's full data bundle (privacy tab).
+export async function exportMyDataBlob(): Promise<Blob> {
+  const res = await fetch(`${BASE}/me/export`, {
+    headers: { Authorization: `Bearer ${await getToken()}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, 'export failed');
+  return res.blob();
+}
 
 // exportBoardBlob downloads an export with proper auth (used by the topbar menu).
 export async function exportBoardBlob(id: string, format: 'markdown' | 'text'): Promise<Blob> {

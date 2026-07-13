@@ -65,13 +65,82 @@ export interface Txn {
   createdAt: string;
 }
 
+// ---- user settings (mirrors domain.UserSettings) ----
+
+export type Theme = 'light' | 'dark' | 'system';
+export type Language = 'en' | 'ar';
+
+export interface AppearanceSettings {
+  theme: Theme;
+  accentColor: string;
+  dotGrid: boolean;
+  cardShadows: boolean;
+  uiDensity: 'comfortable' | 'compact';
+}
+
+export interface PreferenceSettings {
+  doubleClickCreates: 'note' | 'board' | 'none';
+  wheelMode: 'pan' | 'zoom';
+  snapToGrid: boolean;
+  spellCheck: boolean;
+  openBoardsWith: 'doubleClick' | 'singleClick';
+  showHints: boolean;
+}
+
+export interface LocalizationSettings {
+  language: Language;
+  firstDayOfWeek: 0 | 1 | 6;
+  dateFormat: 'auto' | 'dmy' | 'mdy' | 'ymd';
+  timeFormat: '12h' | '24h';
+}
+
+export interface ToolbarSettings {
+  hiddenTools: string[];
+}
+
+export interface NotificationSettings {
+  mentions: boolean;
+  comments: boolean;
+  shares: boolean;
+  assignments: boolean;
+  boardChanges: boolean;
+  reminders: boolean;
+  emailEnabled: boolean;
+  emailDigest: 'off' | 'daily' | 'weekly';
+}
+
+export interface PrivacySettings {
+  showPresence: boolean;
+  showEmailToOthers: boolean;
+}
+
+export interface UserSettings {
+  appearance: AppearanceSettings;
+  preferences: PreferenceSettings;
+  localization: LocalizationSettings;
+  toolbar: ToolbarSettings;
+  notifications: NotificationSettings;
+  privacy: PrivacySettings;
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  appearance: { theme: 'system', accentColor: '#5e5ce6', dotGrid: true, cardShadows: true, uiDensity: 'comfortable' },
+  preferences: { doubleClickCreates: 'note', wheelMode: 'pan', snapToGrid: false, spellCheck: true, openBoardsWith: 'doubleClick', showHints: true },
+  localization: { language: 'en', firstDayOfWeek: 1, dateFormat: 'auto', timeFormat: '12h' },
+  toolbar: { hiddenTools: [] },
+  notifications: { mentions: true, comments: true, shares: true, assignments: true, boardChanges: false, reminders: true, emailEnabled: false, emailDigest: 'off' },
+  privacy: { showPresence: true, showEmailToOthers: true },
+};
+
 export interface User {
   id: string;
   keycloakSub: string;
   email: string;
   displayName: string;
+  avatarUrl?: string;
   homeBoardId: string;
   plan: string;
+  settings?: UserSettings;
 }
 
 export interface BreadcrumbEntry { id: string; title: string }
