@@ -38,6 +38,9 @@ func Connect(ctx context.Context, uri, dbName string) (*Store, error) {
 // Close disconnects the client.
 func (s *Store) Close(ctx context.Context) error { return s.Client.Disconnect(ctx) }
 
+// Ping verifies the primary still answers (readiness probes).
+func (s *Store) Ping(ctx context.Context) error { return s.Client.Ping(ctx, readpref.Primary()) }
+
 // NewID mints a 24-hex ObjectId string.
 func NewID() string { return primitive.NewObjectID().Hex() }
 

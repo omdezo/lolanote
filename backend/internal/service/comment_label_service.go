@@ -18,11 +18,15 @@ type CommentService struct {
 	notifier *Notifier
 	access   *AccessResolver
 	newID    IDGenerator
+	events   domain.EventBroadcaster // optional: live comment.new pushes
 }
 
 func NewCommentService(comments domain.CommentRepository, elements domain.ElementRepository, notifier *Notifier, access *AccessResolver, newID IDGenerator) *CommentService {
 	return &CommentService{comments: comments, elements: elements, notifier: notifier, access: access, newID: newID}
 }
+
+// AttachEvents enables realtime comment broadcasts to the board room.
+func (s *CommentService) AttachEvents(events domain.EventBroadcaster) { s.events = events }
 
 // List returns a thread's messages after a view check.
 func (s *CommentService) List(ctx context.Context, p *domain.Principal, threadID string) ([]*domain.Comment, error) {
@@ -33,8 +37,9 @@ func (s *CommentService) List(ctx context.Context, p *domain.Principal, threadID
 }
 
 // Add posts a message. Feedback-level access suffices — read-only boards can
-// allow commenting without edit rights (§6.1 mechanism 3).
-func (s *CommentService) Add(ctx context.Context, p *domain.Principal, threadID, body string) (*domain.Comment, error) {
+// allow commenting without edit rights (§6.1 mechanism 3). Mentions carry the
+// mentioned users' subs (the client resolves @names to subs before posting).
+func (s *CommentService) Add(ctx context.Context, p *domain.Principal, threadID, body string, mentions []string) (*domain.Comment, error) {
 	if body == "" {
 		return nil, domain.ErrValidation
 	}
@@ -52,9 +57,27 @@ func (s *CommentService) Add(ctx context.Context, p *domain.Principal, threadID,
 	if err := s.comments.Insert(ctx, c); err != nil {
 		return nil, err
 	}
-	// Notify the board owner about new feedback (skip self-comments); the
-	// notifier drops it when the owner muted comment notifications.
-	if board.ACL != nil && board.ACL.OwnerID != p.Sub {
+
+	// Live push to everyone viewing the board.
+	if s.events != nil {
+		s.events.BroadcastEvent(board.ID, "comment.new", c)
+	}
+
+	// @mentions notify the mentioned users (gated by their preferences).
+	notified := map[string]bool{p.Sub: true}
+	for _, sub := range mentions {
+		if sub == "" || notified[sub] {
+			continue
+		}
+		notified[sub] = true
+		s.notifier.Notify(ctx, &domain.Notification{
+			ID: s.newID(), UserID: sub, Kind: domain.NotifyMention,
+			ActorID: p.Sub, BoardID: board.ID, ElementID: threadID,
+			Message: p.Name + " mentioned you on \"" + board.Title() + "\"",
+		})
+	}
+	// The board owner hears about new feedback (unless already mentioned).
+	if board.ACL != nil && !notified[board.ACL.OwnerID] {
 		s.notifier.Notify(ctx, &domain.Notification{
 			ID: s.newID(), UserID: board.ACL.OwnerID, Kind: domain.NotifyComment,
 			ActorID: p.Sub, BoardID: board.ID, ElementID: threadID,

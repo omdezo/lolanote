@@ -2,13 +2,14 @@
 // embeds (YouTube/Vimeo/Spotify/SoundCloud/Google Maps), images, files
 // (with inline audio/video players for media uploads), color swatches,
 // sketches, and comment threads.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QComment, QElement } from '../../api/types';
 import { api } from '../../api/client';
 import { currentSub } from '../../auth/keycloak';
 import { dirAttr, elementDir } from '../../lib/direction';
 import { iconByName, isLetterIcon } from '../../lib/iconCatalog';
 import { updateOp, useBoard } from '../../store/boardStore';
+import { useUserNames } from '../../store/userNames';
 import type { ElementViewProps } from './ElementView';
 import { AliasArrow, AudioIcon, BoardGlyph, CommentIcon, FileIcon, SyncIcon, VideoIcon } from '../Icons';
 
@@ -387,21 +388,79 @@ export function SketchCard({ element }: { element: QElement }) {
 }
 
 // ---- COMMENT_THREAD (§4.17) ----
+// Real author names (users/resolve cache), live updates over the socket,
+// and @mentions: typing @ opens a collaborator picker; mentioned users get
+// a notification.
 
 export function CommentCard({ element }: { element: QElement }) {
   const [comments, setComments] = useState<QComment[]>([]);
   const [body, setBody] = useState('');
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentions, setMentions] = useState<Record<string, string>>({}); // name → sub
+  const users = useUserNames((s) => s.users);
+  const { elements, boardId } = useBoard();
 
   useEffect(() => {
     api.comments(element.id).then(setComments).catch(() => setComments([]));
   }, [element.id]);
 
+  // Live: peers' comments on this thread arrive over the socket.
+  useEffect(() => {
+    const onNew = (e: Event) => {
+      const c = (e as CustomEvent).detail as QComment;
+      if (c.threadId !== element.id) return;
+      setComments((cs) => (cs.some((x) => x.id === c.id) ? cs : [...cs, c]));
+    };
+    window.addEventListener('qomra:comment', onNew);
+    return () => window.removeEventListener('qomra:comment', onNew);
+  }, [element.id]);
+
+  // Resolve author names for everything on screen.
+  useEffect(() => {
+    const subs = comments.map((c) => c.authorId);
+    if (subs.length) void useUserNames.getState().resolve(subs);
+  }, [comments]);
+
+  // Collaborators on this board = mention candidates.
+  const collaborators = useMemo(() => {
+    const acl = elements[boardId]?.acl;
+    const subs = [acl?.ownerId, ...(acl?.editors ?? [])].filter(Boolean) as string[];
+    return subs;
+  }, [elements, boardId]);
+  useEffect(() => {
+    if (collaborators.length) void useUserNames.getState().resolve(collaborators);
+  }, [collaborators]);
+
+  const mentionMatches = mentionQuery === null ? [] : collaborators
+    .map((sub) => ({ sub, name: users[sub]?.name ?? sub.slice(0, 8) }))
+    .filter((u) => u.sub !== currentSub() && u.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .slice(0, 5);
+
+  const onBodyChange = (v: string) => {
+    setBody(v);
+    // An @word being typed at the end opens the picker.
+    const m = /@([^\s@]*)$/.exec(v);
+    setMentionQuery(m ? m[1] : null);
+  };
+
+  const pickMention = (sub: string, name: string) => {
+    setBody((v) => v.replace(/@([^\s@]*)$/, `@${name} `));
+    setMentions((prev) => ({ ...prev, [name]: sub }));
+    setMentionQuery(null);
+  };
+
   const post = async () => {
     const text = body.trim();
     if (!text) return;
-    const created = await api.addComment(element.id, text);
-    setComments((cs) => [...cs, created]);
+    // Only names still present in the text mention their users.
+    const mentioned = Object.entries(mentions)
+      .filter(([name]) => text.includes(`@${name}`))
+      .map(([, sub]) => sub);
+    const created = await api.addComment(element.id, text, mentioned);
+    setComments((cs) => (cs.some((x) => x.id === created.id) ? cs : [...cs, created]));
     setBody('');
+    setMentions({});
+    setMentionQuery(null);
   };
 
   const dir = dirAttr(elementDir(element));
@@ -411,20 +470,38 @@ export function CommentCard({ element }: { element: QElement }) {
       <div className="thread-title"><CommentIcon size={13} /> COMMENTS</div>
       {comments.map((c) => (
         <div key={c.id} className="comment-msg" dir={dir}>
-          <div className="author">{c.authorId === currentSub() ? 'You' : c.authorId.slice(0, 8)}</div>
+          <div className="author">{c.authorId === currentSub() ? 'You' : (users[c.authorId]?.name ?? c.authorId.slice(0, 8))}</div>
           {c.body}
           <ReactionBar comment={c} onUpdate={(u) => setComments((cs) => cs.map((x) => (x.id === u.id ? u : x)))} />
         </div>
       ))}
-      <input
-        className="comment-input"
-        dir={dir}
-        placeholder="Reply… (Enter to send)"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onPointerDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => { if (e.key === 'Enter') void post(); }}
-      />
+      <div style={{ position: 'relative' }}>
+        {mentionQuery !== null && mentionMatches.length > 0 && (
+          <div className="mention-pop" onPointerDown={(e) => e.stopPropagation()}>
+            {mentionMatches.map((u) => (
+              <button key={u.sub} onClick={() => pickMention(u.sub, u.name)}>@{u.name}</button>
+            ))}
+          </div>
+        )}
+        <input
+          className="comment-input"
+          dir={dir}
+          placeholder="Reply… @ to mention"
+          value={body}
+          onChange={(e) => onBodyChange(e.target.value)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && mentionQuery !== null && mentionMatches.length > 0) {
+              e.preventDefault();
+              pickMention(mentionMatches[0].sub, mentionMatches[0].name);
+            } else if (e.key === 'Enter') {
+              void post();
+            } else if (e.key === 'Escape') {
+              setMentionQuery(null);
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

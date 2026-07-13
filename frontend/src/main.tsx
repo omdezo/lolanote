@@ -9,6 +9,14 @@ import './styles/settings.css';
 // native beforeinput listener covers every plain text field in the app.
 initSmartDigits();
 
+// Installable PWA: register the app-shell service worker (production only —
+// it would fight Vite's dev server).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

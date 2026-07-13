@@ -6,9 +6,9 @@ import (
 
 // registerRoutes declares the full /api/v1 surface (see PLAN.md §3.3).
 func registerRoutes(e *echo.Echo, h *Handlers) {
-	// System probes — no auth.
+	// System probes — no auth. readyz actually pings Mongo + Keycloak.
 	e.GET("/healthz", h.Health)
-	e.GET("/readyz", h.Health)
+	e.GET("/readyz", h.Ready)
 
 	// Local-driver blob store: GET is public (unguessable ObjectId keys feed
 	// <img src>, which cannot send headers); PUT requires a valid token.
@@ -31,6 +31,7 @@ func registerRoutes(e *echo.Echo, h *Handlers) {
 	// Bootstrap & identity
 	api.GET("/me", h.Me)
 	api.GET("/users/lookup", h.LookupUser)
+	api.POST("/users/resolve", h.ResolveUsers)
 
 	// Account & settings (the Settings dialog surface)
 	api.PATCH("/me", h.UpdateMe)
@@ -58,6 +59,8 @@ func registerRoutes(e *echo.Echo, h *Handlers) {
 
 	// Transactions — THE write path
 	api.POST("/transactions", h.ApplyTransaction)
+	// Cross-board move (drag onto a breadcrumb or board tile → Unsorted)
+	api.POST("/elements/move", h.MoveElements)
 
 	// Trash
 	api.GET("/trash", h.ListTrash)

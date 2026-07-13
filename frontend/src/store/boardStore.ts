@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { api } from '../api/client';
 import type { BreadcrumbEntry, Op, PresenceUser, QElement, User } from '../api/types';
+import { loadBoardSnapshot, saveBoardSnapshot, type BoardSnapshot } from '../lib/boardCache';
 import { newClientId, newObjectId } from '../lib/objectId';
 import { toast } from '../components/ui/Toaster';
 
@@ -98,21 +99,35 @@ export const useBoard = create<BoardState>((set, get) => ({
 
   async openBoard(boardId) {
     set({ loading: true, boardId, elements: {}, selection: new Set(), undoStack: [], redoStack: [], presence: {}, remoteEditing: {} });
+
+    // Render-from-cache-first (§9.6): a cached snapshot paints instantly;
+    // the network fetch below reconciles to server truth right after.
+    const applySnapshot = (snap: BoardSnapshot | { view: any; children: QElement[]; unsorted: QElement[] }, loading: boolean) => {
+      // A navigation may have superseded this board while we awaited.
+      if (get().boardId !== boardId) return;
+      const elements: Record<string, QElement> = { [snap.view.board.id]: snap.view.board };
+      for (const el of [...snap.children, ...snap.unsorted]) elements[el.id] = el;
+      set({
+        boardTitle: snap.view.board.content?.title ?? 'Untitled',
+        breadcrumb: snap.view.breadcrumb ?? [],
+        role: snap.view.role,
+        readOnly: snap.view.role !== 'owner' && snap.view.role !== 'edit',
+        elements,
+        loading,
+      });
+    };
+
+    const cached = await loadBoardSnapshot(boardId);
+    if (cached) applySnapshot(cached, true);
+
     const [view, children, unsorted] = await Promise.all([
       api.board(boardId),
       api.boardChildren(boardId),
       api.boardUnsorted(boardId),
     ]);
-    const elements: Record<string, QElement> = { [view.board.id]: view.board };
-    for (const el of [...children, ...unsorted]) elements[el.id] = el;
-    set({
-      boardTitle: view.board.content?.title ?? 'Untitled',
-      breadcrumb: view.breadcrumb ?? [],
-      role: view.role,
-      readOnly: view.role !== 'owner' && view.role !== 'edit',
-      elements,
-      loading: false,
-    });
+    applySnapshot({ view, children, unsorted }, false);
+    void saveBoardSnapshot(boardId, { view, children, unsorted });
+
     // Board-tile subtitles load after the canvas paints; failures are cosmetic.
     api.boardChildStats(boardId)
       .then((boardStats) => set({ boardStats: boardStats ?? {} }))
@@ -142,6 +157,7 @@ export const useBoard = create<BoardState>((set, get) => ({
       // Keep whatever selection still exists.
       selection: new Set(Array.from(s.selection).filter((id) => elements[id])),
     }));
+    void saveBoardSnapshot(boardId, { view, children, unsorted });
     api.boardChildStats(boardId)
       .then((boardStats) => set({ boardStats: boardStats ?? {} }))
       .catch(() => undefined);

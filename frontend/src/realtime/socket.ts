@@ -85,6 +85,14 @@ async function open() {
         store.setRemoteEditing(elementId, peer?.name ?? 'Someone', on);
         break;
       }
+      case 'comment.new':
+        // Comment cards subscribe via a window event (they own local state).
+        window.dispatchEvent(new CustomEvent('qomra:comment', { detail: env.data }));
+        break;
+      case 'notification.new':
+        // The bell refreshes instantly instead of waiting for its poll.
+        window.dispatchEvent(new CustomEvent('qomra:notification', { detail: env.data }));
+        break;
     }
   };
 

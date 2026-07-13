@@ -12,9 +12,11 @@ import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementShell } from './ElementShell';
 import { LineLayer } from './LineLayer';
-import { FitIcon, MinusIcon, NoteIcon, BoardIcon, PlusIcon } from '../components/Icons';
+import { CloseIcon, FitIcon, MinusIcon, NoteIcon, BoardIcon, PlusIcon } from '../components/Icons';
+import { presenceColor } from '../components/Topbar';
 import { useContextMenu } from '../components/ui/ContextMenu';
 import { pasteAt } from '../store/clipboard';
+import { useLabels } from '../store/labels';
 
 interface Props { navigate: (boardId: string) => Promise<void> }
 
@@ -299,8 +301,8 @@ export function BoardCanvas({ navigate }: Props) {
         )}
         {remoteCursors.map((p) => (
           <div key={p.clientId} className="remote-cursor" style={{ transform: `translate(${p.cursor!.x}px, ${p.cursor!.y}px)` }}>
-            <div className="dot" />
-            <div className="name">{p.name || 'Guest'}</div>
+            <div className="dot" style={{ background: presenceColor(p.sub || p.clientId) }} />
+            <div className="name" style={{ background: presenceColor(p.sub || p.clientId) }}>{p.name || 'Guest'}</div>
           </div>
         ))}
         {marquee && (
@@ -325,6 +327,8 @@ export function BoardCanvas({ navigate }: Props) {
         </div>
       )}
 
+      <LabelFilterBar elements={canvasElements} />
+
       <div className="zoom-cluster" onPointerDown={(e) => e.stopPropagation()}>
         <button onClick={() => applyZoom(0.85)} title="Zoom out"><MinusIcon size={15} /></button>
         <div className="zoom-value">{Math.round(scale * 100)}%</div>
@@ -334,6 +338,39 @@ export function BoardCanvas({ navigate }: Props) {
 
       {canvasElements.length === 0 && !drawMode && useSettings.getState().settings.preferences.showHints && (
         <div className="hint-pill">Double-click anywhere to add a note · drop images to upload · Ctrl+scroll to zoom</div>
+      )}
+    </div>
+  );
+}
+
+// LabelFilterBar (§4.18): every label used on the current board renders as a
+// toggleable chip — active labels keep their cards lit, everything else dims.
+function LabelFilterBar({ elements }: { elements: QElement[] }) {
+  const labels = useLabels((s) => s.labels);
+  const labelFilter = useView((s) => s.labelFilter);
+  const { toggleLabelFilter, clearLabelFilter } = useView.getState();
+
+  const used = new Set<string>();
+  for (const el of elements) for (const id of el.labelIds ?? []) used.add(id);
+  const chips = labels.filter((l) => used.has(l.id));
+  if (chips.length === 0) return null;
+
+  return (
+    <div className="label-filter-bar" onPointerDown={(e) => e.stopPropagation()}>
+      {chips.map((l) => (
+        <button
+          key={l.id}
+          className={`label-chip filter${labelFilter.has(l.id) ? ' on' : ''}`}
+          style={{ background: l.color }}
+          onClick={() => toggleLabelFilter(l.id)}
+        >
+          {l.name}
+        </button>
+      ))}
+      {labelFilter.size > 0 && (
+        <button className="label-filter-clear" title="Clear filter" onClick={clearLabelFilter}>
+          <CloseIcon size={12} />
+        </button>
       )}
     </div>
   );

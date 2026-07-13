@@ -19,7 +19,14 @@ export function NotificationsBell({ navigate }: { navigate: (boardId: string) =>
   useEffect(() => {
     void load();
     const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
+    // Live: the server pushes notification.new over the socket — the badge
+    // updates instantly instead of waiting for the next poll.
+    const onPush = () => void load();
+    window.addEventListener('qomra:notification', onPush);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('qomra:notification', onPush);
+    };
   }, []);
 
   useEffect(() => {

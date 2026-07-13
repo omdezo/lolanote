@@ -21,6 +21,7 @@ import { useBoardStyle } from '../components/ui/BoardStylePopover';
 import { useContextMenu } from '../components/ui/ContextMenu';
 import { LabelChips, useLabelPopover } from '../components/ui/LabelPopover';
 import { prompt } from '../components/ui/Prompt';
+import { toast } from '../components/ui/Toaster';
 import { newObjectId } from '../lib/objectId';
 
 interface Props {
@@ -34,9 +35,14 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
   const ref = useRef<HTMLDivElement>(null);
   const { selection, select, commitTransaction, remoteEditing } = useBoard();
   const drag = useView((s) => s.drag);
+  const labelFilter = useView((s) => s.labelFilter);
   const selected = selection.has(element.id);
   const isDragging = !!drag && drag.ids.includes(element.id);
   const remoteEditor = remoteEditing[element.id];
+  // Label filter: cards without any selected label fade back.
+  const labelDimmed = labelFilter.size > 0
+    && element.type !== 'LINE'
+    && !(element.labelIds ?? []).some((id) => labelFilter.has(id));
 
   // Measure rendered size — the line layer and marquee hit-tests need it.
   useEffect(() => {
@@ -110,6 +116,24 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
           .map((el) => deleteOp(el));
         void state.commitTransaction(ops);
         state.clearSelection();
+        return;
+      }
+
+      // Dropping on a breadcrumb (or the Home crumb) files the selection
+      // into that board's Unsorted tray — Milanote's move-up gesture (§5).
+      const crumbBoard = dropNode?.closest('[data-crumb-board]')?.getAttribute('data-crumb-board');
+      if (crumbBoard && crumbBoard !== state.boardId) {
+        const movable = d.ids.filter((id) => {
+          const el = state.elements[id];
+          return el && el.type !== 'LINE' && !el.content?.isHome;
+        });
+        if (movable.length) {
+          void api.moveElements(movable, crumbBoard).then(() => {
+            void state.refreshBoard();
+            toast.success(`Moved ${movable.length} item${movable.length === 1 ? '' : 's'} to Unsorted`);
+          }).catch((err) => toast.error(err?.message || 'Move failed'));
+          state.clearSelection();
+        }
         return;
       }
 
@@ -283,6 +307,7 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
     selected ? 'selected' : '',
     isDragging ? 'dragging' : '',
     remoteEditor ? 'remote-edit' : '',
+    labelDimmed ? 'label-dim' : '',
     element.type === 'COLUMN' ? 'column' : '',
     element.type === 'BOARD' || element.type === 'ALIAS' ? 'board-shell' : '',
     element.content?.variant === 'heading' ? 'heading-el' : '',

@@ -20,31 +20,43 @@ interface Props {
   setPanel: (p: PanelKind) => void;
 }
 
+// presenceColor gives each collaborator a stable hue from their identity.
+export function presenceColor(seed: string): string {
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360}, 62%, 48%)`;
+}
+
 export function Topbar({ navigate, panel, setPanel }: Props) {
   const { user, boardId, boardTitle, breadcrumb, presence, undoStack, redoStack, undo, redo, role } = useBoard();
   // Subscribing to the language keeps every t() label live on change.
   useSettings((s) => s.settings.localization.language);
   const [exporting, setExporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const isHome = user?.homeBoardId === boardId;
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !exportOpen) return;
     const onDown = (e: PointerEvent) => {
       if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false);
     };
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
-  }, [menuOpen]);
+  }, [menuOpen, exportOpen]);
 
-  const doExport = async (format: 'markdown' | 'text') => {
+  const doExport = async (format: 'markdown' | 'text' | 'json') => {
+    setExportOpen(false);
     setExporting(true);
     try {
       const blob = await exportBoardBlob(boardId, format);
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `${boardTitle || 'board'}.${format === 'markdown' ? 'md' : 'txt'}`;
+      const ext = format === 'markdown' ? 'md' : format === 'json' ? 'json' : 'txt';
+      a.download = `${boardTitle || 'board'}.${ext}`;
       a.click();
       URL.revokeObjectURL(a.href);
     } finally {
@@ -68,13 +80,13 @@ export function Topbar({ navigate, panel, setPanel }: Props) {
       <div className="breadcrumbs">
         {user && !isHome && (
           <>
-            <button className="crumb" onClick={() => void navigate(user.homeBoardId)}>{t('app.home')}</button>
+            <button className="crumb" data-crumb-board={user.homeBoardId} onClick={() => void navigate(user.homeBoardId)}>{t('app.home')}</button>
             <span className="crumb-sep"><ChevronIcon size={13} /></span>
           </>
         )}
         {breadcrumb.filter((b) => b.id !== user?.homeBoardId).map((b) => (
           <span key={b.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <button className="crumb" onClick={() => void navigate(b.id)}>{b.title || t('app.untitled')}</button>
+            <button className="crumb" data-crumb-board={b.id} onClick={() => void navigate(b.id)}>{b.title || t('app.untitled')}</button>
             <span className="crumb-sep"><ChevronIcon size={13} /></span>
           </span>
         ))}
@@ -83,7 +95,9 @@ export function Topbar({ navigate, panel, setPanel }: Props) {
 
       <div className="presence-stack">
         {Object.values(presence).slice(0, 5).map((p) => (
-          <div key={p.clientId} className="avatar" title={p.name}>{(p.name || '?').slice(0, 2)}</div>
+          <div key={p.clientId} className="avatar" title={p.name} style={{ background: presenceColor(p.sub || p.clientId) }}>
+            {(p.name || '?').slice(0, 2)}
+          </div>
         ))}
       </div>
 
@@ -99,10 +113,19 @@ export function Topbar({ navigate, panel, setPanel }: Props) {
         <TemplateIcon size={17} />
       </button>
       <NotificationsBell navigate={navigate} />
-      <button className="topbar-btn icon-only" onClick={() => void doExport('markdown')} disabled={exporting || isHome}
-        title={isHome ? t('topbar.homeNoExport') : t('topbar.export')}>
-        <ExportIcon size={17} />
-      </button>
+      <div className="avatar-menu-wrap" ref={exportRef}>
+        <button className="topbar-btn icon-only" onClick={() => setExportOpen(!exportOpen)} disabled={exporting || isHome}
+          title={isHome ? t('topbar.homeNoExport') : t('topbar.export')}>
+          <ExportIcon size={17} />
+        </button>
+        {exportOpen && !isHome && (
+          <div className="avatar-dropdown" style={{ width: 180 }}>
+            <button className="ad-item" onClick={() => void doExport('markdown')}>Markdown (.md)</button>
+            <button className="ad-item" onClick={() => void doExport('text')}>Plain text (.txt)</button>
+            <button className="ad-item" onClick={() => void doExport('json')}>JSON (.json)</button>
+          </div>
+        )}
+      </div>
       <button
         className="topbar-btn primary"
         onClick={() => toggle('share')}
@@ -115,7 +138,7 @@ export function Topbar({ navigate, panel, setPanel }: Props) {
 
       <div className="avatar-menu-wrap" ref={menuRef}>
         <button className="avatar-btn" onClick={() => setMenuOpen(!menuOpen)} title={user?.displayName ?? ''}>
-          {initials}
+          {user?.avatarUrl ? <img className="avatar-img" src={user.avatarUrl} alt="" /> : initials}
         </button>
         {menuOpen && (
           <div className="avatar-dropdown">

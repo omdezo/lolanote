@@ -14,12 +14,17 @@ import (
 type Notifier struct {
 	notifications domain.NotificationRepository
 	users         domain.UserRepository
+	events        domain.EventBroadcaster // optional: live badge pushes
 }
 
 // NewNotifier constructs the gate.
 func NewNotifier(notifications domain.NotificationRepository, users domain.UserRepository) *Notifier {
 	return &Notifier{notifications: notifications, users: users}
 }
+
+// AttachEvents enables realtime "notification.new" pushes to the recipient's
+// open connections (the bell updates without waiting for the poll).
+func (n *Notifier) AttachEvents(events domain.EventBroadcaster) { n.events = events }
 
 // wants reports whether the recipient accepts notifications of this kind.
 // Unknown kinds default to allowed so new event types are never lost.
@@ -57,5 +62,10 @@ func (n *Notifier) Notify(ctx context.Context, note *domain.Notification) {
 	if !n.wants(ctx, note.UserID, note.Kind) {
 		return
 	}
-	_ = n.notifications.Insert(ctx, note)
+	if err := n.notifications.Insert(ctx, note); err != nil {
+		return
+	}
+	if n.events != nil {
+		n.events.NotifyUser(note.UserID, "notification.new", note)
+	}
 }

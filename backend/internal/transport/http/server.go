@@ -41,6 +41,13 @@ func NewServer(cfg *config.Config, log *zap.Logger, h *Handlers) *Server {
 		AllowHeaders: []string{echo.HeaderAuthorization, echo.HeaderContentType, "X-Share-Token", "X-Client-Id"},
 	}))
 	e.Use(echomw.BodyLimit("64M")) // local-driver uploads flow through the API
+	// Token-bucket per client IP: generous for normal app traffic, a real
+	// wall against scripted abuse (auth probing, upload floods).
+	e.Use(echomw.RateLimiterWithConfig(echomw.RateLimiterConfig{
+		Store: echomw.NewRateLimiterMemoryStoreWithConfig(echomw.RateLimiterMemoryStoreConfig{
+			Rate: 50, Burst: 120, ExpiresIn: 3 * time.Minute,
+		}),
+	}))
 
 	registerRoutes(e, h)
 	return &Server{echo: e, cfg: cfg, log: log}

@@ -23,6 +23,8 @@ interface ViewState {
   drag: DragState | null;
   lineDraft: LineDraft | null;
   drawMode: boolean;
+  // Label filter: when non-empty, cards without a selected label dim out.
+  labelFilter: Set<string>;
   sizes: Record<string, { w: number; h: number }>;
   editingId: string | null;
   lastPointer: { x: number; y: number }; // last canvas-space pointer (paste target)
@@ -30,6 +32,8 @@ interface ViewState {
   setView(panX: number, panY: number, scale: number): void;
   setDrag(d: DragState | null): void;
   setLineDraft(d: LineDraft | null): void;
+  toggleLabelFilter(labelId: string): void;
+  clearLabelFilter(): void;
   setDrawMode(on: boolean): void;
   reportSize(id: string, w: number, h: number): void;
   setEditing(id: string | null): void;
@@ -43,6 +47,7 @@ export const useView = create<ViewState>((set, get) => ({
   drag: null,
   lineDraft: null,
   drawMode: false,
+  labelFilter: new Set(),
   sizes: {},
   editingId: null,
   lastPointer: { x: 0, y: 0 },
@@ -50,6 +55,14 @@ export const useView = create<ViewState>((set, get) => ({
   setView: (panX, panY, scale) => set({ panX, panY, scale }),
   setDrag: (drag) => set({ drag }),
   setLineDraft: (lineDraft) => set({ lineDraft }),
+  toggleLabelFilter: (labelId) =>
+    set((s) => {
+      const labelFilter = new Set(s.labelFilter);
+      if (labelFilter.has(labelId)) labelFilter.delete(labelId);
+      else labelFilter.add(labelId);
+      return { labelFilter };
+    }),
+  clearLabelFilter: () => set({ labelFilter: new Set() }),
   setDrawMode: (drawMode) => set({ drawMode }),
   reportSize: (id, w, h) =>
     set((s) => {

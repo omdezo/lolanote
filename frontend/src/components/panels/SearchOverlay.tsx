@@ -1,9 +1,10 @@
 // Global search (§3.5): Ctrl/⌘+F overlay spanning the current board and
 // every board you own, sorted by last modified. Clicking a result jumps to
 // its board.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { QElement } from '../../api/types';
+import { useBoard } from '../../store/boardStore';
 import {
   BoardIcon, CloseIcon, ColorIcon, ColumnIcon, CommentIcon, DocumentIcon,
   FileIcon, ImageIcon, LinkIcon, NoteIcon, TableIcon, TodoIcon,
@@ -22,8 +23,19 @@ export function SearchOverlay({ onClose, navigate }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<QElement[]>([]);
   const [searching, setSearching] = useState(false);
+  const [scope, setScope] = useState<'board' | 'everywhere'>('everywhere');
+  const { boardId, elements } = useBoard();
   const inputRef = useRef<HTMLInputElement>(null);
   const debounce = useRef<number>(0);
+
+  // "This board" keeps only hits living on the open board (the board itself,
+  // direct children, or children of its columns/lists — all in the store).
+  const visible = useMemo(() => {
+    if (scope === 'everywhere') return results;
+    return results.filter((el) => el.id === boardId
+      || el.location.parentId === boardId
+      || !!elements[el.location.parentId]);
+  }, [results, scope, boardId, elements]);
 
   useEffect(() => inputRef.current?.focus(), []);
 
@@ -60,14 +72,18 @@ export function SearchOverlay({ onClose, navigate }: Props) {
             placeholder="Search notes, boards, links, files…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && results[0]) void open(results[0]); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && visible[0]) void open(visible[0]); }}
           />
+          <div className="segmented" style={{ marginTop: 10 }}>
+            <button className={scope === 'board' ? 'on' : ''} onClick={() => setScope('board')}>This board</button>
+            <button className={scope === 'everywhere' ? 'on' : ''} onClick={() => setScope('everywhere')}>Everywhere</button>
+          </div>
           <div style={{ marginTop: 10 }}>
             {searching && <div style={{ color: '#9a97a5', fontSize: 13, padding: 8 }}>Searching…</div>}
-            {!searching && query.trim() && results.length === 0 && (
+            {!searching && query.trim() && visible.length === 0 && (
               <div style={{ color: '#9a97a5', fontSize: 13, padding: 8 }}>No matches.</div>
             )}
-            {results.map((el) => (
+            {visible.map((el) => (
               <div key={el.id} className="search-result" onClick={() => void open(el)}>
                 <span className="sr-icon">{typeIcons[el.type] ?? <FileIcon size={16} />}</span>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

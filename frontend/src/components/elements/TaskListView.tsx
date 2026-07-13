@@ -2,13 +2,15 @@
 // indentation for subtasks, inline add, due dates, and reminders. Every
 // toggle/edit is one transaction, so undo works per interaction. Reminder
 // delivery is the backend sweep: reminderAt (RFC3339) → notification.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { QElement } from '../../api/types';
+import { currentSub } from '../../auth/keycloak';
 import { formatDate } from '../../i18n';
 import { dirAttr, elementDir } from '../../lib/direction';
 import { createOp, deleteOp, updateOp, useBoard } from '../../store/boardStore';
 import { useLocalization } from '../../store/settingsStore';
-import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon } from '../Icons';
+import { useUserNames } from '../../store/userNames';
+import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon, UserPlusIcon } from '../Icons';
 
 export function TaskListView({ element }: { element: QElement }) {
   const { elements, commitTransaction } = useBoard();
@@ -74,11 +76,19 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [text, setText] = useState<string | null>(null);
   const [datePop, setDatePop] = useState<{ x: number; y: number } | null>(null);
+  const [assignPop, setAssignPop] = useState<{ x: number; y: number } | null>(null);
   const localization = useLocalization();
+  const users = useUserNames((s) => s.users);
   const done = !!task.content?.done;
   const indent = (task.content?.indent as number) ?? 0;
   const dueDate = (task.content?.dueDate as string) || '';
   const reminderAt = (task.content?.reminderAt as string) || '';
+  const assigneeId = (task.content?.assigneeId as string) || '';
+
+  useEffect(() => {
+    if (assigneeId) void useUserNames.getState().resolve([assigneeId]);
+  }, [assigneeId]);
+  const assigneeName = assigneeId ? (users[assigneeId]?.name ?? assigneeId.slice(0, 8)) : '';
 
   const dueClass = (() => {
     if (!dueDate || done) return '';
@@ -134,6 +144,17 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
           <CalendarIcon size={13} />
         </button>
         <button
+          title="Assign to…"
+          className="task-date-btn"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setAssignPop(assignPop ? null : { x: Math.min(r.left, window.innerWidth - 240), y: r.bottom + 6 });
+          }}
+        >
+          <UserPlusIcon size={13} />
+        </button>
+        <button
           title="Delete task"
           className="task-del"
           onPointerDown={(e) => e.stopPropagation()}
@@ -143,7 +164,7 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
         </button>
       </div>
 
-      {(dueDate || reminderAt) && (
+      {(dueDate || reminderAt || assigneeId) && (
         <div className="task-meta" style={{ marginLeft: 27 + indent * 22 }}>
           {dueDate && (
             <button className={`task-chip${dueClass}`} onPointerDown={(e) => e.stopPropagation()}
@@ -159,6 +180,16 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
               <ClockIcon size={11} />
             </span>
           )}
+          {assigneeId && (
+            <button className="task-chip assignee" title={`Assigned to ${assigneeName}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setAssignPop(assignPop ? null : { x: Math.min(r.left, window.innerWidth - 240), y: r.bottom + 6 });
+              }}>
+              <span className="task-assignee-dot">{assigneeName.slice(0, 2)}</span> {assigneeName}
+            </button>
+          )}
         </div>
       )}
 
@@ -170,6 +201,55 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
           onClose={() => setDatePop(null)}
         />
       )}
+      {assignPop && (
+        <AssigneePopover
+          task={task}
+          x={assignPop.x}
+          y={assignPop.y}
+          onClose={() => setAssignPop(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// AssigneePopover lists the board's collaborators (owner + editors) — the
+// people who can actually see the task. Assigning writes content.assigneeId;
+// the server notifies the assignee (§4.11).
+function AssigneePopover({ task, x, y, onClose }: { task: QElement; x: number; y: number; onClose: () => void }) {
+  const { elements, boardId, commitTransaction } = useBoard();
+  const users = useUserNames((s) => s.users);
+  const acl = elements[boardId]?.acl;
+  const subs = useMemo(
+    () => Array.from(new Set([acl?.ownerId, ...(acl?.editors ?? []), currentSub()].filter(Boolean))) as string[],
+    [acl],
+  );
+  useEffect(() => { if (subs.length) void useUserNames.getState().resolve(subs); }, [subs]);
+
+  const assign = (sub: string | null) => {
+    void commitTransaction([updateOp(task, { content: { assigneeId: sub } })]);
+    onClose();
+  };
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 219 }} onPointerDown={(e) => { e.stopPropagation(); onClose(); }} />
+      <div className="task-date-pop" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
+        <label>ASSIGN TO</label>
+        {subs.map((sub) => (
+          <button
+            key={sub}
+            className={`assignee-row${task.content?.assigneeId === sub ? ' on' : ''}`}
+            onClick={() => assign(sub)}
+          >
+            <span className="task-assignee-dot">{(users[sub]?.name ?? sub).slice(0, 2)}</span>
+            {users[sub]?.name ?? sub.slice(0, 8)}{sub === currentSub() ? ' (me)' : ''}
+          </button>
+        ))}
+        {task.content?.assigneeId && (
+          <button className="tdp-clear" onClick={() => assign(null)}>Unassign</button>
+        )}
+      </div>
     </>
   );
 }

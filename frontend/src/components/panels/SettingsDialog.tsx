@@ -3,8 +3,8 @@
 // notifications, Appearance, Preferences, Localization, Toolbar options,
 // Privacy) with a danger zone for account deletion. Every toggle writes
 // through the settings store (optimistic + debounced PATCH).
-import { useState } from 'react';
-import { api, exportMyDataBlob } from '../../api/client';
+import { useRef, useState } from 'react';
+import { api, exportMyDataBlob, uploadFile } from '../../api/client';
 import type { UserSettings } from '../../api/types';
 import { logout } from '../../auth/keycloak';
 import { t, type TKey } from '../../i18n';
@@ -119,8 +119,23 @@ function AccountTab({ onDeleted }: { onDeleted: () => void }) {
   const [busy, setBusy] = useState(false);
   const [field1, setField1] = useState('');
   const [field2, setField2] = useState('');
+  const avatarInput = useRef<HTMLInputElement>(null);
 
   if (!user) return null;
+
+  const uploadAvatar = async (file: File | undefined | null) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setBusy(true);
+    try {
+      const { url } = await uploadFile(file);
+      setUser(await api.updateMe({ avatarUrl: url }));
+      toast.success('Photo updated');
+    } catch {
+      toast.error('Photo upload failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const open = (which: 'name' | 'email' | 'password') => {
     setEditing(editing === which ? null : which);
@@ -165,6 +180,23 @@ function AccountTab({ onDeleted }: { onDeleted: () => void }) {
 
   return (
     <>
+      <Row label="Photo" sub={user.avatarUrl ? 'Custom photo' : 'Initials'}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="avatar-btn" style={{ cursor: 'default' }}>
+            {user.avatarUrl
+              ? <img className="avatar-img" src={user.avatarUrl} alt="" />
+              : (user.displayName || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('')}
+          </span>
+          <button className="sr-action" disabled={busy} onClick={() => avatarInput.current?.click()}>{t('account.change')}</button>
+          {user.avatarUrl && (
+            <button className="sr-action danger" disabled={busy}
+              onClick={() => void api.updateMe({ avatarUrl: '-' }).then(setUser)}>
+              Remove
+            </button>
+          )}
+          <input ref={avatarInput} type="file" accept="image/*" hidden onChange={(e) => void uploadAvatar(e.target.files?.[0])} />
+        </div>
+      </Row>
       <Row label={t('account.name')} sub={user.displayName}>
         <button className="sr-action" onClick={() => open('name')}>{t('account.change')}</button>
       </Row>

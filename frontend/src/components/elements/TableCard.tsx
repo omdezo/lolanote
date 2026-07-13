@@ -1,11 +1,13 @@
 // Table card (§4.10): an editable grid with a header row, Tab/Enter
-// navigation, add/remove rows and columns, and auto-detected numeric
-// alignment. Cell edits commit one transaction per blur so undo works
-// per-cell. (The research notes Milanote embeds Handsontable+HyperFormula;
-// this is a clean-room grid with the formula engine as a future extension.)
+// navigation, add/remove rows and columns, auto-detected numeric alignment,
+// and a formula engine — '=' cells evaluate arithmetic, cell refs (B2), and
+// ranges with SUM/AVG/MIN/MAX/COUNT. The computed value displays; focusing
+// the cell reveals the formula. Cell edits commit one transaction per blur
+// so undo works per-cell.
 import { useState } from 'react';
 import type { QElement } from '../../api/types';
 import { dirAttr, elementDir, normalizeDigits } from '../../lib/direction';
+import { evaluateCell } from '../../lib/formula';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { MinusIcon, PlusIcon } from '../Icons';
 
@@ -48,12 +50,20 @@ export function TableCard({ element }: { element: QElement }) {
             <tr key={r}>
               {row.map((val, c) => {
                 const editing = draft && draft.r === r && draft.c === c;
-                const value = editing ? draft.v : val;
+                // Display the computed value; editing shows the raw formula.
+                const evaluated = editing ? null : evaluateCell(val, cells, r, c);
+                const value = editing ? draft.v : (evaluated?.display ?? val);
+                const numericCell = (isNumeric(value) || evaluated?.isFormula) && r > 0;
                 return (
                   <td key={c}>
                     <input
-                      className={isNumeric(value) && r > 0 ? 'num' : undefined}
-                      dir={isNumeric(value) && r > 0 ? 'ltr' : dirAttr(elementDir(element))}
+                      className={[
+                        numericCell && !evaluated?.error ? 'num' : '',
+                        evaluated?.isFormula ? 'formula' : '',
+                        evaluated?.error ? 'formula-err' : '',
+                      ].filter(Boolean).join(' ') || undefined}
+                      title={evaluated?.isFormula ? val : undefined}
+                      dir={numericCell ? 'ltr' : dirAttr(elementDir(element))}
                       value={value}
                       onFocus={() => setDraft({ r, c, v: val })}
                       onChange={(e) => setDraft({ r, c, v: e.target.value })}

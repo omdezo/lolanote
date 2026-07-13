@@ -235,3 +235,21 @@ export const DashIcon = (p: P) => (
 export const WeightIcon = (p: P) => (
   <svg {...base(p)}><path d="M4.5 6.5h15" strokeWidth="1.2" /><path d="M4.5 12h15" strokeWidth="2.2" /><path d="M4.5 18h15" strokeWidth="3.4" /></svg>
 );
+export const UnderlineIcon = (p: P) => (
+  <svg {...base(p)}><path d="M7 4.5v6a5 5 0 0 0 10 0v-6" /><path d="M6 19.5h12" /></svg>
+);
+export const ListOrderedIcon = (p: P) => (
+  <svg {...base(p)}><path d="M10 6.5h9.5M10 12h9.5M10 17.5h9.5" /><path d="M4.5 5l1.5-1v4.5" strokeWidth="1.4" /><path d="M4 10.8a1.5 1.5 0 0 1 3 .3c0 1.3-3 2-3 3.4h3.2" strokeWidth="1.4" /><path d="M4.2 16.2h2.2l-1.2 1.6a1.4 1.4 0 1 1-1.2 2.3" strokeWidth="1.4" /></svg>
+);
+export const TextColorIcon = (p: P) => (
+  <svg {...base(p)}><path d="m7 15.5 5-11 5 11M8.6 12h6.8" /><path d="M5.5 19.5h13" strokeWidth="3" /></svg>
+);
+export const NoteColorIcon = (p: P) => (
+  <svg {...base(p)}><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M4.5 13.5 10 8l9.5 9.5" /><circle cx="15.5" cy="8.5" r="1.4" fill="currentColor" stroke="none" /></svg>
+);
+export const AtIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a2.5 2.5 0 0 0 5 0v-1a9 9 0 1 0-3.5 7.1" /></svg>
+);
+export const UserPlusIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="10" cy="8.4" r="3.2" /><path d="M4 19.3c.8-2.8 3.2-4.4 6-4.4 1.3 0 2.5.3 3.5 1" /><path d="M17.5 13.5v5M15 16h5" /></svg>
+);

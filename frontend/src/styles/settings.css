@@ -430,3 +430,83 @@
   filter: drop-shadow(0 1.5px 2px rgba(0, 0, 0, 0.28));
 }
 .row-tile .tile-glyph { width: 23px; height: 23px; }
+
+/* ============ Notes formatting depth ============ */
+.fmt-bar-wrap { position: absolute; top: -44px; left: 0; z-index: 35; }
+.fmt-bar-wrap .fmt-bar { position: static; }
+.fmt-palette {
+  display: flex; gap: 5px; margin-top: 5px;
+  background: var(--overlay-bg); border-radius: 9px; padding: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3); width: max-content;
+}
+.fmt-swatch {
+  width: 20px; height: 20px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+.fmt-swatch:hover { transform: scale(1.15); }
+.fmt-swatch.none {
+  background: transparent; position: relative;
+}
+.fmt-swatch.none::after {
+  content: ''; position: absolute; left: 2px; right: 2px; top: 50%;
+  height: 1.6px; background: #ff6b6b; transform: rotate(-45deg);
+}
+.fmt-hl-swatch {
+  width: 14px; height: 14px; border-radius: 4px; background: #fff3bf;
+  display: inline-block; border: 1px solid rgba(0,0,0,0.15);
+}
+.note-card .ProseMirror a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.note-card .ProseMirror mark { border-radius: 3px; padding: 0 2px; }
+.note-card .ProseMirror ol { margin: 0 0 6px; padding-inline-start: 22px; }
+
+/* ============ Comments: mentions ============ */
+.mention-pop {
+  position: absolute; bottom: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface); border-radius: 10px; box-shadow: var(--shadow-pop);
+  padding: 4px; z-index: 50; display: flex; flex-direction: column;
+}
+.mention-pop button {
+  text-align: start; font-size: 12.5px; font-weight: 600; color: var(--accent);
+  padding: 7px 10px; border-radius: 7px; cursor: pointer;
+}
+.mention-pop button:hover { background: var(--accent-tint); }
+
+/* ============ Task assignees ============ */
+.task-assignee-dot {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent); color: #fff; font-size: 8.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-transform: uppercase;
+}
+.task-chip.assignee { gap: 5px; }
+.assignee-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 8px; border-radius: 8px; font-size: 13px; color: var(--ink);
+  text-align: start; cursor: pointer;
+}
+.assignee-row:hover { background: var(--hover); }
+.assignee-row.on { background: var(--accent-tint); color: var(--accent); font-weight: 600; }
+
+/* ============ Label filter bar ============ */
+.label-filter-bar {
+  position: absolute; top: 12px; left: 14px; z-index: 32;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 60%;
+  background: var(--glass); backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--r-pill); padding: 6px 9px; box-shadow: var(--shadow-1);
+}
+.label-chip.filter {
+  cursor: pointer; opacity: 0.55; font-size: 11px; padding: 3px 11px;
+  transition: opacity 0.12s var(--ease), transform 0.12s var(--ease);
+}
+.label-chip.filter:hover { opacity: 0.85; }
+.label-chip.filter.on { opacity: 1; transform: scale(1.05); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
+.label-filter-clear { color: var(--ink-3); display: flex; padding: 3px; border-radius: 50%; }
+.label-filter-clear:hover { color: var(--ink); background: var(--hover); }
+.el.label-dim { opacity: 0.22; filter: saturate(0.4); }
+
+/* ============ Avatar image ============ */
+.avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+
+/* Formula cells */
+.qn-table td input.formula { color: var(--accent); font-weight: 600; }
+.qn-table td input.formula-err { color: var(--danger); font-weight: 600; }

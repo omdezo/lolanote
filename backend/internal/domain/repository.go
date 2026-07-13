@@ -151,3 +151,11 @@ type Presigner interface {
 type TransactionBroadcaster interface {
 	BroadcastTransaction(boardID string, t *Transaction)
 }
+
+// EventBroadcaster pushes ad-hoc realtime events: to everyone on a board
+// (new comments) or to every connection of one user across boards (new
+// notifications). The realtime hub implements this.
+type EventBroadcaster interface {
+	BroadcastEvent(boardID, event string, data any)
+	NotifyUser(sub, event string, data any)
+}

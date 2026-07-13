@@ -136,7 +136,8 @@ func (h *Handlers) ListComments(c echo.Context) error {
 }
 
 type commentRequest struct {
-	Body string `json:"body"`
+	Body     string   `json:"body"`
+	Mentions []string `json:"mentions"`
 }
 
 func (h *Handlers) AddComment(c echo.Context) error {
@@ -144,7 +145,7 @@ func (h *Handlers) AddComment(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return domain.ErrValidation
 	}
-	comment, err := h.Comments.Add(c.Request().Context(), principal(c), c.Param("id"), req.Body)
+	comment, err := h.Comments.Add(c.Request().Context(), principal(c), c.Param("id"), req.Body, req.Mentions)
 	if err != nil {
 		return err
 	}

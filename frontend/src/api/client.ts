@@ -114,9 +114,14 @@ export const api = {
 
   search: (q: string) => request<QElement[]>('GET', `/search?q=${encodeURIComponent(q)}`),
 
+  resolveUsers: (subs: string[]) =>
+    request<Array<{ sub: string; name: string; avatarUrl?: string; email?: string }>>('POST', '/users/resolve', { subs }),
+  moveElements: (ids: string[], targetBoardId: string) =>
+    request<void>('POST', '/elements/move', { ids, targetBoardId }),
+
   comments: (threadId: string) => request<QComment[]>('GET', `/threads/${threadId}/comments`),
-  addComment: (threadId: string, body: string) =>
-    request<QComment>('POST', `/threads/${threadId}/comments`, { body }),
+  addComment: (threadId: string, body: string, mentions: string[] = []) =>
+    request<QComment>('POST', `/threads/${threadId}/comments`, { body, mentions }),
   editComment: (id: string, body: string) => request<QComment>('PATCH', `/comments/${id}`, { body }),
   react: (id: string, emoji: string) => request<QComment>('POST', `/comments/${id}/reactions`, { emoji }),
 
@@ -141,7 +146,7 @@ export async function exportMyDataBlob(): Promise<Blob> {
 }
 
 // exportBoardBlob downloads an export with proper auth (used by the topbar menu).
-export async function exportBoardBlob(id: string, format: 'markdown' | 'text'): Promise<Blob> {
+export async function exportBoardBlob(id: string, format: 'markdown' | 'text' | 'json'): Promise<Blob> {
   const res = await fetch(`${BASE}/boards/${id}/export?format=${format}`, {
     headers: { Authorization: `Bearer ${await getToken()}` },
   });

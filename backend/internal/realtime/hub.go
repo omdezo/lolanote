@@ -51,7 +51,34 @@ func NewHub(log *zap.Logger) *Hub {
 	return &Hub{rooms: map[string]*room{}, log: log.Named("realtime")}
 }
 
-var _ domain.TransactionBroadcaster = (*Hub)(nil)
+var (
+	_ domain.TransactionBroadcaster = (*Hub)(nil)
+	_ domain.EventBroadcaster       = (*Hub)(nil)
+)
+
+// BroadcastEvent pushes an ad-hoc event to everyone in a board room.
+func (h *Hub) BroadcastEvent(boardID, event string, data any) {
+	h.broadcast(boardID, mustEnvelope(event, data), nil)
+}
+
+// NotifyUser pushes an event to every live connection of one user, whatever
+// board each connection is on (notification badges update everywhere).
+func (h *Hub) NotifyUser(sub, event string, data any) {
+	env := mustEnvelope(event, data)
+	h.mu.RLock()
+	targets := make([]*Client, 0, 4)
+	for _, r := range h.rooms {
+		for c := range r.clients {
+			if c.Principal != nil && c.Principal.Sub == sub {
+				targets = append(targets, c)
+			}
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range targets {
+		c.Send(env)
+	}
+}
 
 // Register adds a client to its board room and announces it.
 func (h *Hub) Register(c *Client) {

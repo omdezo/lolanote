@@ -77,6 +77,52 @@ func (s *UserService) Bootstrap(ctx context.Context, p *domain.Principal) (*doma
 	return u, nil
 }
 
+// ResolvedUser is a public-safe identity slice for rendering collaborators.
+type ResolvedUser struct {
+	Sub       string `json:"sub"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Email     string `json:"email,omitempty"`
+}
+
+// ResolveNames maps subs to display names (comment authors, assignees,
+// mention pickers). Emails are included only when the target user allows it
+// (privacy → ShowEmailToOthers). Unknown subs resolve to a truncated id.
+func (s *UserService) ResolveNames(ctx context.Context, subs []string) []ResolvedUser {
+	if len(subs) > 100 {
+		subs = subs[:100]
+	}
+	out := make([]ResolvedUser, 0, len(subs))
+	seen := map[string]bool{}
+	for _, sub := range subs {
+		if sub == "" || seen[sub] {
+			continue
+		}
+		seen[sub] = true
+		u, err := s.users.GetBySub(ctx, sub)
+		if err != nil {
+			out = append(out, ResolvedUser{Sub: sub, Name: shortSub(sub)})
+			continue
+		}
+		r := ResolvedUser{Sub: sub, Name: u.DisplayName, AvatarURL: u.AvatarURL}
+		if u.EffectiveSettings().Privacy.ShowEmailToOthers {
+			r.Email = u.Email
+		}
+		if r.Name == "" {
+			r.Name = shortSub(sub)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func shortSub(sub string) string {
+	if len(sub) > 8 {
+		return sub[:8]
+	}
+	return sub
+}
+
 // LookupByEmail resolves a collaborator: Keycloak first (source of truth),
 // local mirror as fallback when the admin client is not configured.
 func (s *UserService) LookupByEmail(ctx context.Context, email string) (sub, name string, err error) {

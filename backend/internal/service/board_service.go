@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -189,6 +190,21 @@ func (s *BoardService) Export(ctx context.Context, p *domain.Principal, boardID,
 	}
 	if _, _, err := s.access.RequireView(ctx, boardID, p); err != nil {
 		return "", "", err
+	}
+
+	// JSON: the full raw subtree — lossless, machine-readable.
+	if format == "json" {
+		descendants, err := s.elements.Descendants(ctx, board.ID, false)
+		if err != nil {
+			return "", "", err
+		}
+		payload, err := json.MarshalIndent(map[string]any{
+			"board": board, "elements": descendants,
+		}, "", "  ")
+		if err != nil {
+			return "", "", err
+		}
+		return string(payload), "application/json; charset=utf-8", nil
 	}
 
 	var b strings.Builder

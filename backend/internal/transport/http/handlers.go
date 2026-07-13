@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,6 +37,7 @@ type Handlers struct {
 	Verifier      *auth.Verifier
 	Tickets       *auth.TicketStore
 	Local         *storage.LocalPresigner // nil when the R2 driver is active
+	ReadyCheck    func(ctx context.Context) error
 	Log           *zap.Logger
 }
 
@@ -43,6 +45,17 @@ type Handlers struct {
 
 func (h *Handlers) Health(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// Ready reports whether the dependencies (Mongo, Keycloak) actually answer —
+// compose healthchecks and orchestrators gate traffic on this.
+func (h *Handlers) Ready(c echo.Context) error {
+	if h.ReadyCheck != nil {
+		if err := h.ReadyCheck(c.Request().Context()); err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "degraded", "error": err.Error()})
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // ---- bootstrap & identity ----
@@ -65,6 +78,38 @@ func (h *Handlers) LookupUser(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]string{"sub": sub, "name": name, "email": email})
+}
+
+type resolveUsersRequest struct {
+	Subs []string `json:"subs"`
+}
+
+// ResolveUsers batch-maps subs to display names (comment authors, assignee
+// pickers, mention suggestions).
+func (h *Handlers) ResolveUsers(c echo.Context) error {
+	var req resolveUsersRequest
+	if err := c.Bind(&req); err != nil || len(req.Subs) == 0 {
+		return domain.ErrValidation
+	}
+	return c.JSON(http.StatusOK, h.Users.ResolveNames(c.Request().Context(), req.Subs))
+}
+
+type moveAcrossRequest struct {
+	IDs           []string `json:"ids"`
+	TargetBoardID string   `json:"targetBoardId"`
+}
+
+// MoveElements reparents elements into another board's Unsorted tray — the
+// drag-onto-breadcrumb / board-tile gesture.
+func (h *Handlers) MoveElements(c echo.Context) error {
+	var req moveAcrossRequest
+	if err := c.Bind(&req); err != nil {
+		return domain.ErrValidation
+	}
+	if err := h.Txns.MoveAcrossBoards(c.Request().Context(), principal(c), req.IDs, req.TargetBoardID); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // ---- boards ----

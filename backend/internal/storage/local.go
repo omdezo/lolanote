@@ -44,6 +44,18 @@ func (p *LocalPresigner) Path(key string) (string, error) {
 	return filepath.Join(p.dir, clean), nil
 }
 
+// Remove deletes a stored blob (attachment garbage collection).
+func (p *LocalPresigner) Remove(key string) error {
+	path, err := p.Path(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // Save streams a request body into the file for key.
 func (p *LocalPresigner) Save(key string, body io.Reader) error {
 	path, err := p.Path(key)

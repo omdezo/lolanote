@@ -93,6 +93,7 @@ func (s *TransactionService) Apply(ctx context.Context, p *domain.Principal, boa
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastTransaction(boardID, txn)
 	}
+	s.fanOutCloneUpdates(ctx, boardID, txn)
 	s.notifyAssignments(ctx, p, boardID, ops)
 	return txn, nil
 }
@@ -158,6 +159,14 @@ func (s *TransactionService) verifyOpScope(ctx context.Context, op *domain.Op, b
 			return domain.ErrValidation
 		}
 		if err := s.assertWithin(ctx, op.ElementID, boardID, cache); err != nil {
+			// Synced notes (§4.15): editing a CLONE edits its source CARD,
+			// which lives on ANOTHER board. Allow the update when one of the
+			// source's clone instances sits inside the declared board.
+			if op.Action == domain.ActionUpdate {
+				if ok, cerr := s.cloneInstanceWithin(ctx, op.ElementID, boardID, cache); cerr == nil && ok {
+					return nil
+				}
+			}
 			return err
 		}
 		return s.verifyMoveTarget(ctx, op, boardID, cache)
@@ -222,6 +231,141 @@ func (s *TransactionService) withinBoard(ctx context.Context, elementID, boardID
 }
 
 func key(elementID, boardID string) string { return elementID + "|" + boardID }
+
+// cloneInstanceWithin reports whether any CLONE instance of sourceID lives
+// inside boardID (the cross-board synced-note edit path).
+func (s *TransactionService) cloneInstanceWithin(ctx context.Context, sourceID, boardID string, cache map[string]bool) (bool, error) {
+	instances, err := s.elements.CloneInstances(ctx, sourceID)
+	if err != nil {
+		return false, err
+	}
+	for _, inst := range instances {
+		if ok, err := s.withinBoard(ctx, inst.ID, boardID, cache); err == nil && ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// fanOutCloneUpdates re-broadcasts a committed transaction to every OTHER
+// board holding a clone instance of an updated card, so synced notes update
+// live everywhere (§4.15) — not just in the room the edit happened in.
+func (s *TransactionService) fanOutCloneUpdates(ctx context.Context, boardID string, txn *domain.Transaction) {
+	if s.broadcaster == nil {
+		return
+	}
+	seen := map[string]bool{boardID: true}
+	for _, op := range txn.Ops {
+		if op.Action != domain.ActionUpdate {
+			continue
+		}
+		instances, err := s.elements.CloneInstances(ctx, op.ElementID)
+		if err != nil {
+			continue
+		}
+		for _, inst := range instances {
+			b, err := s.nearestBoard(ctx, inst.ID)
+			if err != nil || b == "" || seen[b] {
+				continue
+			}
+			seen[b] = true
+			s.broadcaster.BroadcastTransaction(b, txn)
+		}
+	}
+}
+
+// nearestBoard walks an element's containment chain to its owning board.
+func (s *TransactionService) nearestBoard(ctx context.Context, elementID string) (string, error) {
+	id := elementID
+	for depth := 0; id != "" && depth < 64; depth++ {
+		el, err := s.elements.Get(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if el.Type == domain.TypeBoard {
+			return el.ID, nil
+		}
+		id = el.Location.ParentID
+	}
+	return "", nil
+}
+
+// MoveAcrossBoards reparents elements into another board's Unsorted tray —
+// the drag-onto-breadcrumb / drag-onto-board-tile gesture (§5). The op is
+// validated against BOTH sides (edit on every element and on the target),
+// recorded as a transaction on the target board, and broadcast to every
+// affected room.
+func (s *TransactionService) MoveAcrossBoards(ctx context.Context, p *domain.Principal, ids []string, targetBoardID string) error {
+	if len(ids) == 0 || targetBoardID == "" {
+		return domain.ErrValidation
+	}
+	target, err := s.elements.Get(ctx, targetBoardID)
+	if err != nil {
+		return err
+	}
+	if target.Type != domain.TypeBoard {
+		return domain.ErrValidation
+	}
+	if _, err := s.access.RequireEdit(ctx, targetBoardID, p); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	sourceBoards := map[string]bool{}
+	ops := make([]domain.Op, 0, len(ids))
+	for _, id := range ids {
+		el, err := s.elements.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if el.Type == domain.TypeLine || isHome(el) || el.ID == targetBoardID {
+			continue
+		}
+		if _, err := s.access.RequireEdit(ctx, id, p); err != nil {
+			return err
+		}
+		if src, err := s.nearestBoard(ctx, el.Location.ParentID); err == nil && src != "" {
+			sourceBoards[src] = true
+		}
+		ops = append(ops, domain.Op{
+			ElementID: id,
+			Action:    domain.ActionMove,
+			Changes: domain.Content{"location": map[string]any{
+				"parentId": targetBoardID,
+				"section":  string(domain.SectionUnsorted),
+				"index":    float64(now.UnixMilli()) / 1000,
+			}},
+			UndoChanges: domain.Content{"location": map[string]any{
+				"parentId": el.Location.ParentID,
+				"section":  string(el.Location.Section),
+				"index":    el.Location.Index,
+			}},
+		})
+	}
+	if len(ops) == 0 {
+		return domain.ErrValidation
+	}
+	for i := range ops {
+		if _, err := s.elements.MergePatch(ctx, ops[i].ElementID, ops[i].Changes); err != nil {
+			return err
+		}
+	}
+	txn := &domain.Transaction{
+		ID: s.newID(), BoardID: targetBoardID, UserID: p.Sub, Ops: ops, CreatedAt: now,
+	}
+	if err := s.transactions.Insert(ctx, txn); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastTransaction(targetBoardID, txn)
+		for b := range sourceBoards {
+			if b != targetBoardID {
+				s.broadcaster.BroadcastTransaction(b, txn)
+			}
+		}
+	}
+	return nil
+}
 
 // createParentID pulls the parent id out of a create op's changes payload.
 func createParentID(op *domain.Op) string {

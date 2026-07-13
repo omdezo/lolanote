@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -88,6 +91,7 @@ var serveCmd = &cobra.Command{
 		newID := service.IDGenerator(repo.NewID)
 
 		notifier := service.NewNotifier(notifications, users)
+		notifier.AttachEvents(hub) // live notification badges
 		userSvc := service.NewUserService(users, elements, identity, newID)
 		accountSvc := service.NewAccountService(users, elements, labels, attachments, notifications, accounts, log)
 		txnSvc := service.NewTransactionService(elements, transactions, access, hub, newID, log)
@@ -98,18 +102,47 @@ var serveCmd = &cobra.Command{
 		uploadSvc := service.NewUploadService(attachments, presigner, newID)
 		linkSvc := service.NewLinkService()
 		commentSvc := service.NewCommentService(comments, elements, notifier, access, newID)
+		commentSvc.AttachEvents(hub) // live comment threads
 		labelSvc := service.NewLabelService(labels, elements, access, newID)
 
-		// Background sweep: due task reminders become notifications (§4.11).
+		// Background sweeps: due task reminders become notifications (§4.11);
+		// expired trash purges and abandoned uploads collect every 6 hours.
 		reminderSvc := service.NewReminderService(elements, access, notifier, newID, log)
 		go reminderSvc.Run(ctx, time.Minute)
+		var blobRemover service.BlobRemover
+		if localDriver != nil {
+			blobRemover = localDriver
+		}
+		maintenanceSvc := service.NewMaintenanceService(elements, attachments, blobRemover, log)
+		go maintenanceSvc.Run(ctx, 6*time.Hour)
+
+		// Readiness: Mongo ping + Keycloak discovery reachable.
+		readyCheck := func(rctx context.Context) error {
+			rctx, cancel := context.WithTimeout(rctx, 3*time.Second)
+			defer cancel()
+			if err := store.Ping(rctx); err != nil {
+				return fmt.Errorf("mongo: %w", err)
+			}
+			req, _ := http.NewRequestWithContext(rctx, http.MethodGet,
+				strings.TrimSuffix(cfg.KeycloakInternalBase, "/")+"/realms/"+cfg.KeycloakRealm+"/.well-known/openid-configuration", nil)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return fmt.Errorf("keycloak: %w", err)
+			}
+			_ = res.Body.Close()
+			if res.StatusCode >= 400 {
+				return fmt.Errorf("keycloak: status %d", res.StatusCode)
+			}
+			return nil
+		}
 
 		handlers := &httptransport.Handlers{
 			Users: userSvc, Account: accountSvc, Boards: boardSvc, Elements: elementSvc,
 			Txns: txnSvc, Share: shareSvc, Uploads: uploadSvc,
 			Links: linkSvc, Comments: commentSvc, Labels: labelSvc,
 			Notifications: notifications, Access: access,
-			Hub: hub, Verifier: verifier, Tickets: tickets, Local: localDriver, Log: log,
+			Hub: hub, Verifier: verifier, Tickets: tickets, Local: localDriver,
+			ReadyCheck: readyCheck, Log: log,
 		}
 
 		server := httptransport.NewServer(cfg, log, handlers)
