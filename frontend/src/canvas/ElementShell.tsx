@@ -194,16 +194,18 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
   }, [element.id]);
 
   const onDuplicate = useCallback(async () => {
-    await api.duplicate(element.id);
-    await useBoard.getState().refreshBoard();
+    const created = await api.duplicate(element.id);
+    const state = useBoard.getState();
+    state.upsertElements(created);
+    if (created[0]) state.select([created[0].id]);
   }, [element.id]);
 
   const onSyncCopy = useCallback(async () => {
     // Synced note (§4.15): a CLONE instance sharing this card's content.
-    await api.convertToClone(element.id, element.location.parentId, {
+    const clone = await api.convertToClone(element.id, element.location.parentId, {
       x: element.location.position.x + 40, y: element.location.position.y + 40,
     });
-    await useBoard.getState().refreshBoard();
+    useBoard.getState().upsertElements([clone]);
   }, [element]);
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {

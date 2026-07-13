@@ -119,7 +119,13 @@ export default function App() {
         const state = useBoard.getState();
         const ids = Array.from(state.selection);
         if (ids.length) {
-          void Promise.all(ids.map((id) => api.duplicate(id))).then(() => state.refreshBoard());
+          // Merge the server-created copies straight into the store (no board
+          // refetch) and move the selection onto them.
+          void Promise.all(ids.map((id) => api.duplicate(id))).then((results) => {
+            const created = results.flat();
+            state.upsertElements(created);
+            state.select(results.map((r) => r[0]?.id).filter(Boolean) as string[]);
+          });
         }
       } else if (mod && e.key.toLowerCase() === 'c' && !inEditor) {
         copySelection();

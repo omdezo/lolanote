@@ -33,6 +33,7 @@ interface BoardState {
   setUser(u: User): void;
   openBoard(boardId: string): Promise<void>;
   refreshBoard(): Promise<void>;
+  upsertElements(els: QElement[]): void;
   applyOps(ops: Op[]): void;
   commitTransaction(ops: Op[]): Promise<void>;
   undo(): void;
@@ -118,9 +119,43 @@ export const useBoard = create<BoardState>((set, get) => ({
       .catch(() => set({ boardStats: {} }));
   },
 
+  // refreshBoard re-syncs the CURRENT board with server truth in place — no
+  // clearing, no loading flash, no unmount/remount of every card, and the
+  // undo/redo stacks survive. (openBoard's full reset is for navigation.)
+  // Used after socket reconnects and server-rejected transactions.
   async refreshBoard() {
     const { boardId } = get();
-    if (boardId) await get().openBoard(boardId);
+    if (!boardId) return;
+    const [view, children, unsorted] = await Promise.all([
+      api.board(boardId),
+      api.boardChildren(boardId),
+      api.boardUnsorted(boardId),
+    ]);
+    const elements: Record<string, QElement> = { [view.board.id]: view.board };
+    for (const el of [...children, ...unsorted]) elements[el.id] = el;
+    set((s) => ({
+      boardTitle: view.board.content?.title ?? 'Untitled',
+      breadcrumb: view.breadcrumb ?? [],
+      role: view.role,
+      readOnly: view.role !== 'owner' && view.role !== 'edit',
+      elements,
+      // Keep whatever selection still exists.
+      selection: new Set(Array.from(s.selection).filter((id) => elements[id])),
+    }));
+    api.boardChildStats(boardId)
+      .then((boardStats) => set({ boardStats: boardStats ?? {} }))
+      .catch(() => undefined);
+  },
+
+  // upsertElements merges server-created elements (duplicates, clones) into
+  // the store without refetching the board.
+  upsertElements(els) {
+    if (els.length === 0) return;
+    set((s) => {
+      const elements = { ...s.elements };
+      for (const el of els) elements[el.id] = el;
+      return { elements };
+    });
   },
 
   // applyOps is THE reducer — local commits and remote broadcasts both land here.
