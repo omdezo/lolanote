@@ -7,6 +7,7 @@ import type { QComment, QElement } from '../../api/types';
 import { api } from '../../api/client';
 import { currentSub } from '../../auth/keycloak';
 import { dirAttr, elementDir } from '../../lib/direction';
+import { isLetterIcon } from '../../lib/iconCatalog';
 import { updateOp, useBoard } from '../../store/boardStore';
 import type { ElementViewProps } from './ElementView';
 import { AliasArrow, AudioIcon, BoardGlyph, CommentIcon, FileIcon, SyncIcon, VideoIcon } from '../Icons';
@@ -54,6 +55,12 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   const styleSource = (isAlias ? target?.content : element.content) ?? {};
   const tileBg = (styleSource.color as string) || tileFor(statsId ?? element.id);
   const tileIcon = (styleSource.icon as string) || '';
+  const tileImg = (styleSource.iconUrl as string) || '';
+  const tileGlyph = tileImg
+    ? <img className="tile-img" src={tileImg} alt="" draggable={false} />
+    : tileIcon
+      ? <span className={`tile-icon${isLetterIcon(tileIcon) ? ' tile-letter' : ''}`}>{tileIcon}</span>
+      : null;
 
   const open = () => {
     const id = isAlias ? element.content?.targetBoardId : element.id;
@@ -88,7 +95,7 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
     return (
       <div className="board-row" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
         <div className="tile row-tile" style={{ background: tileBg }}>
-          {tileIcon ? <span className="tile-icon">{tileIcon}</span> : <BoardGlyph size={22} />}
+          {tileGlyph ?? <BoardGlyph size={22} />}
           {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={11} /></div>}
         </div>
         <div className="board-row-text">
@@ -102,7 +109,7 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   return (
     <div className="board-card" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
       <div className="tile" style={{ background: tileBg }}>
-        {tileIcon ? <span className="tile-icon">{tileIcon}</span> : <BoardGlyph size={30} />}
+        {tileGlyph ?? <BoardGlyph size={30} />}
         {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={12} /></div>}
       </div>
       {titleNode}

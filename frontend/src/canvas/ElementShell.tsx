@@ -13,7 +13,7 @@ import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementView } from '../components/elements/ElementView';
 import {
-  AliasArrow, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
+  AliasArrow, BoardIcon, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
   LabelIcon, LockIcon, PaletteIcon, RenameIcon, SyncIcon, TemplateIcon, TrashIcon,
 } from '../components/Icons';
 import { useBoardStyle } from '../components/ui/BoardStylePopover';
@@ -249,7 +249,7 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
         onClick: () => {
           // Aliases inherit the target board's look — customize the target.
           const targetId = element.type === 'ALIAS' ? element.content?.targetBoardId : element.id;
-          if (targetId) useBoardStyle.getState().open(e.clientX, e.clientY, targetId);
+          if (targetId) useBoardStyle.getState().open(e.clientX, e.clientY, targetId, 'color');
         },
       }] : []),
       ...(element.type === 'BOARD' ? [{
@@ -302,6 +302,22 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
     element.content?.variant === 'heading' ? 'heading-el' : '',
   ].filter(Boolean).join(' ');
 
+  // Milanote's board side-bar: Color / Icon / Rename appear beside a
+  // selected board (aliases customize their target board's look).
+  const isBoardish = element.type === 'BOARD' || element.type === 'ALIAS';
+  const styleTargetId = element.type === 'ALIAS' ? element.content?.targetBoardId : element.id;
+  const renameBoard = useCallback(() => {
+    void (async () => {
+      const next = await prompt({
+        title: 'Rename board',
+        placeholder: 'Board name',
+        defaultValue: element.content?.title ?? '',
+        confirmLabel: 'Rename',
+      });
+      if (next?.trim()) void useBoard.getState().commitTransaction([updateOp(element, { content: { title: next.trim() } })]);
+    })();
+  }, [element]);
+
   return (
     <div ref={ref} className={cls} style={style} onPointerDown={onPointerDown} onContextMenu={onContextMenu} data-element-id={element.id}>
       {remoteEditor && <div className="remote-edit-badge">{remoteEditor} is editing…</div>}
@@ -312,6 +328,28 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
           <button title="Delete" className="danger" onClick={onDelete}><TrashIcon size={15} /></button>
         </div>
       )}
+      {selected && !lineMode && !isDragging && isBoardish && (
+        <div className="board-actions" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            onClick={(e) => styleTargetId && useBoardStyle.getState().open(e.clientX + 14, e.clientY - 10, styleTargetId, 'color')}
+          >
+            <span className="ba-ico"><PaletteIcon size={16} /></span>
+            <span>Color</span>
+          </button>
+          <button
+            onClick={(e) => styleTargetId && useBoardStyle.getState().open(e.clientX + 14, e.clientY - 10, styleTargetId, 'icon')}
+          >
+            <span className="ba-ico"><BoardIcon size={16} /></span>
+            <span>Icon</span>
+          </button>
+          {element.type === 'BOARD' && (
+            <button onClick={renameBoard}>
+              <span className="ba-ico"><RenameIcon size={16} /></span>
+              <span>Rename</span>
+            </button>
+          )}
+        </div>
+      )}
       <LabelChips labelIds={element.labelIds} />
       <ElementView element={element} navigate={navigate} viewportRef={viewportRef} inColumn={inColumn} />
       {!inColumn && element.type !== 'BOARD' && element.type !== 'ALIAS' && (
@@ -320,11 +358,46 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
       {!inColumn && (
         <div
           className="connect-anchor"
-          title="Drag a connection"
+          title="Drag to connect"
           onPointerDown={(e) => {
+            // Drag-to-connect (§4.12): a ghost line follows the pointer;
+            // releasing over a card connects to it, releasing on open canvas
+            // leaves a free endpoint you can grab later.
             e.stopPropagation();
-            useView.getState().setLineMode(true);
-            useView.getState().setLineSource(element.id);
+            e.preventDefault();
+            const viewport = viewportRef.current ?? (document.querySelector('.canvas-viewport') as HTMLElement | null);
+            if (!viewport) return;
+            const view = useView.getState();
+            const start = view.toCanvas(e.clientX, e.clientY, viewport);
+            view.setLineDraft({ sourceId: element.id, x: start.x, y: start.y });
+
+            const onMove = (ev: PointerEvent) => {
+              const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);
+              useView.getState().setLineDraft({ sourceId: element.id, x: pt.x, y: pt.y });
+            };
+            const onUp = (ev: PointerEvent) => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+              useView.getState().setLineDraft(null);
+              const state = useBoard.getState();
+              const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);
+              const targetShell = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-element-id]');
+              const targetId = targetShell?.getAttribute('data-element-id');
+              if (Math.hypot(pt.x - start.x, pt.y - start.y) < 8 && !targetId) return; // accidental click
+              const content: Record<string, any> = {
+                fromId: element.id, color: '#8a86a0', weight: 2, endArrow: true, curve: 0, label: '',
+              };
+              if (targetId && targetId !== element.id && state.elements[targetId]?.type !== 'LINE') {
+                content.toId = targetId;
+              } else {
+                content.toPoint = { x: pt.x, y: pt.y }; // free endpoint
+              }
+              const op = createOp('LINE', state.boardId, { content });
+              void state.commitTransaction([op]);
+              state.select([op.elementId]);
+            };
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
           }}
         />
       )}

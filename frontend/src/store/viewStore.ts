@@ -9,6 +9,13 @@ export interface DragState {
   dy: number;
 }
 
+// LineDraft is the ghost connection while dragging from a card's anchor.
+export interface LineDraft {
+  sourceId: string;
+  x: number;
+  y: number;
+}
+
 interface ViewState {
   panX: number;
   panY: number;
@@ -16,6 +23,7 @@ interface ViewState {
   drag: DragState | null;
   lineMode: boolean;
   lineSource: string | null;
+  lineDraft: LineDraft | null;
   drawMode: boolean;
   sizes: Record<string, { w: number; h: number }>;
   editingId: string | null;
@@ -25,6 +33,7 @@ interface ViewState {
   setDrag(d: DragState | null): void;
   setLineMode(on: boolean): void;
   setLineSource(id: string | null): void;
+  setLineDraft(d: LineDraft | null): void;
   setDrawMode(on: boolean): void;
   reportSize(id: string, w: number, h: number): void;
   setEditing(id: string | null): void;
@@ -38,6 +47,7 @@ export const useView = create<ViewState>((set, get) => ({
   drag: null,
   lineMode: false,
   lineSource: null,
+  lineDraft: null,
   drawMode: false,
   sizes: {},
   editingId: null,
@@ -47,6 +57,7 @@ export const useView = create<ViewState>((set, get) => ({
   setDrag: (drag) => set({ drag }),
   setLineMode: (lineMode) => set({ lineMode, lineSource: null, drawMode: false }),
   setLineSource: (lineSource) => set({ lineSource }),
+  setLineDraft: (lineDraft) => set({ lineDraft }),
   setDrawMode: (drawMode) => set({ drawMode, lineMode: false, lineSource: null }),
   reportSize: (id, w, h) =>
     set((s) => {

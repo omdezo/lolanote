@@ -223,3 +223,15 @@ export const DirRtlIcon = (p: P) => (
 export const RenameIcon = (p: P) => (
   <svg {...base(p)}><rect x="3.5" y="7" width="17" height="10" rx="2.2" /><path d="M12 4.5v15" strokeWidth="2" /><path d="M7 10.5v3M16.8 10.5v3" opacity="0.6" /></svg>
 );
+export const LineStartIcon = (p: P) => (
+  <svg {...base(p)}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M15.5 12h-7M11 8.5 7.5 12l3.5 3.5" /></svg>
+);
+export const LineEndIcon = (p: P) => (
+  <svg {...base(p)}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M8.5 12h7M13 8.5l3.5 3.5-3.5 3.5" /></svg>
+);
+export const DashIcon = (p: P) => (
+  <svg {...base(p)}><path d="M4 17 8 13M10.5 10.5 14.5 6.5M17 4l3 3" strokeWidth="2" /></svg>
+);
+export const WeightIcon = (p: P) => (
+  <svg {...base(p)}><path d="M4.5 6.5h15" strokeWidth="1.2" /><path d="M4.5 12h15" strokeWidth="2.2" /><path d="M4.5 18h15" strokeWidth="3.4" /></svg>
+);
