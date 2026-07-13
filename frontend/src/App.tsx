@@ -141,7 +141,6 @@ export default function App() {
         );
       } else if (e.key === 'Escape') {
         setPanel('none');
-        useView.getState().setLineMode(false);
         useView.getState().setDrawMode(false);
       }
     };

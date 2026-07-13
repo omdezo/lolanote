@@ -33,7 +33,6 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
   const ref = useRef<HTMLDivElement>(null);
   const { selection, select, commitTransaction, remoteEditing } = useBoard();
   const drag = useView((s) => s.drag);
-  const lineMode = useView((s) => s.lineMode);
   const selected = selection.has(element.id);
   const isDragging = !!drag && drag.ids.includes(element.id);
   const remoteEditor = remoteEditing[element.id];
@@ -61,20 +60,6 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
     if (e.button !== 0) return;
     const view = useView.getState();
     const board = useBoard.getState();
-
-    if (view.lineMode) {
-      e.stopPropagation();
-      if (!view.lineSource) {
-        view.setLineSource(element.id);
-      } else if (view.lineSource !== element.id) {
-        const op = createOp('LINE', board.boardId, {
-          content: { fromId: view.lineSource, toId: element.id, color: '#8a86a0', weight: 2, endArrow: true, curve: 0, label: '' },
-        });
-        void board.commitTransaction([op]);
-        view.setLineMode(false);
-      }
-      return;
-    }
 
     // Interactive innards (inputs, editors, links) keep their own pointer flow.
     if ((e.target as HTMLElement).closest('input, textarea, [contenteditable="true"], a, button, select')) return;
@@ -321,14 +306,14 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
   return (
     <div ref={ref} className={cls} style={style} onPointerDown={onPointerDown} onContextMenu={onContextMenu} data-element-id={element.id}>
       {remoteEditor && <div className="remote-edit-badge">{remoteEditor} is editing…</div>}
-      {selected && !lineMode && (
+      {selected && (
         <div className="el-actions" onPointerDown={(e) => e.stopPropagation()}>
           {element.type === 'CARD' && <button title="Synced copy" onClick={onSyncCopy}><SyncIcon size={15} /></button>}
           <button title="Duplicate (Ctrl+D)" onClick={onDuplicate}><DuplicateIcon size={15} /></button>
           <button title="Delete" className="danger" onClick={onDelete}><TrashIcon size={15} /></button>
         </div>
       )}
-      {selected && !lineMode && !isDragging && isBoardish && (
+      {selected && !isDragging && isBoardish && (
         <div className="board-actions" onPointerDown={(e) => e.stopPropagation()}>
           <button
             onClick={(e) => styleTargetId && useBoardStyle.getState().open(e.clientX + 14, e.clientY - 10, styleTargetId, 'color')}

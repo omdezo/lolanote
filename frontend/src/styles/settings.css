@@ -386,3 +386,10 @@
 .lt-swatch { width: 22px; height: 22px; border-radius: 6px; cursor: pointer; border: 1px solid var(--hairline); }
 .lt-swatch:hover { transform: scale(1.12); }
 .lt-swatch.on { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Lucide glyph icons on board tiles (white stroke, Milanote look) */
+.tile .tile-glyph { width: 34px; height: 34px; color: #fff; }
+.row-tile .tile-glyph { width: 22px; height: 22px; }
+.ip-cell svg { color: var(--ink-2); }
+.ip-cell:hover svg { color: var(--ink); }
+.ip-cell.on svg { color: var(--accent); }

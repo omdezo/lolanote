@@ -167,16 +167,19 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
         {searching || tab === 'recommended' ? (
           results.length ? (
             <div className="ip-grid">
-              {results.map((entry) => (
-                <button
-                  key={entry.e}
-                  className={`ip-cell${currentIcon === entry.e ? ' on' : ''}`}
-                  title={entry.k.split(' ')[0]}
-                  onClick={() => onPick(entry.e)}
-                >
-                  {entry.e}
-                </button>
-              ))}
+              {results.map((entry) => {
+                const Glyph = entry.icon;
+                return (
+                  <button
+                    key={entry.name}
+                    className={`ip-cell${currentIcon === entry.name ? ' on' : ''}`}
+                    title={entry.name}
+                    onClick={() => onPick(entry.name)}
+                  >
+                    <Glyph size={19} strokeWidth={1.8} />
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="ip-empty">No icons match “{query}”</div>

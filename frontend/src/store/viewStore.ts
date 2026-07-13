@@ -21,8 +21,6 @@ interface ViewState {
   panY: number;
   scale: number;
   drag: DragState | null;
-  lineMode: boolean;
-  lineSource: string | null;
   lineDraft: LineDraft | null;
   drawMode: boolean;
   sizes: Record<string, { w: number; h: number }>;
@@ -31,8 +29,6 @@ interface ViewState {
 
   setView(panX: number, panY: number, scale: number): void;
   setDrag(d: DragState | null): void;
-  setLineMode(on: boolean): void;
-  setLineSource(id: string | null): void;
   setLineDraft(d: LineDraft | null): void;
   setDrawMode(on: boolean): void;
   reportSize(id: string, w: number, h: number): void;
@@ -45,8 +41,6 @@ export const useView = create<ViewState>((set, get) => ({
   panY: 0,
   scale: 1,
   drag: null,
-  lineMode: false,
-  lineSource: null,
   lineDraft: null,
   drawMode: false,
   sizes: {},
@@ -55,10 +49,8 @@ export const useView = create<ViewState>((set, get) => ({
 
   setView: (panX, panY, scale) => set({ panX, panY, scale }),
   setDrag: (drag) => set({ drag }),
-  setLineMode: (lineMode) => set({ lineMode, lineSource: null, drawMode: false }),
-  setLineSource: (lineSource) => set({ lineSource }),
   setLineDraft: (lineDraft) => set({ lineDraft }),
-  setDrawMode: (drawMode) => set({ drawMode, lineMode: false, lineSource: null }),
+  setDrawMode: (drawMode) => set({ drawMode }),
   reportSize: (id, w, h) =>
     set((s) => {
       const prev = s.sizes[id];

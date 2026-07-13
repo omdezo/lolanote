@@ -7,7 +7,7 @@ import type { QComment, QElement } from '../../api/types';
 import { api } from '../../api/client';
 import { currentSub } from '../../auth/keycloak';
 import { dirAttr, elementDir } from '../../lib/direction';
-import { isLetterIcon } from '../../lib/iconCatalog';
+import { iconByName, isLetterIcon } from '../../lib/iconCatalog';
 import { updateOp, useBoard } from '../../store/boardStore';
 import type { ElementViewProps } from './ElementView';
 import { AliasArrow, AudioIcon, BoardGlyph, CommentIcon, FileIcon, SyncIcon, VideoIcon } from '../Icons';
@@ -56,11 +56,14 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   const tileBg = (styleSource.color as string) || tileFor(statsId ?? element.id);
   const tileIcon = (styleSource.icon as string) || '';
   const tileImg = (styleSource.iconUrl as string) || '';
+  const LucideGlyph = tileIcon ? iconByName(tileIcon) : undefined;
   const tileGlyph = tileImg
     ? <img className="tile-img" src={tileImg} alt="" draggable={false} />
-    : tileIcon
-      ? <span className={`tile-icon${isLetterIcon(tileIcon) ? ' tile-letter' : ''}`}>{tileIcon}</span>
-      : null;
+    : LucideGlyph
+      ? <LucideGlyph className="tile-glyph" strokeWidth={1.7} />
+      : tileIcon
+        ? <span className={`tile-icon${isLetterIcon(tileIcon) ? ' tile-letter' : ''}`}>{tileIcon}</span>
+        : null;
 
   const open = () => {
     const id = isAlias ? element.content?.targetBoardId : element.id;

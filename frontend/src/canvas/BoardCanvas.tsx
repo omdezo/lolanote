@@ -21,7 +21,7 @@ interface Props { navigate: (boardId: string) => Promise<void> }
 export function BoardCanvas({ navigate }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const { boardId, elements, commitTransaction, clearSelection, select, presence } = useBoard();
-  const { panX, panY, scale, setView, lineMode, drawMode, toCanvas } = useView();
+  const { panX, panY, scale, setView, drawMode, toCanvas } = useView();
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [drawStroke, setDrawStroke] = useState<number[][] | null>(null);
   const panDrag = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
@@ -267,7 +267,7 @@ export function BoardCanvas({ navigate }: Props) {
   }, [boardId, commitTransaction, select, toCanvas]);
 
   const remoteCursors = Object.values(presence).filter((p) => p.cursor);
-  const modeClass = drawMode ? ' draw-mode' : lineMode ? ' line-mode' : '';
+  const modeClass = drawMode ? ' draw-mode' : '';
 
   return (
     <div
@@ -316,10 +316,10 @@ export function BoardCanvas({ navigate }: Props) {
         )}
       </div>
 
-      {(lineMode || drawMode) && (
+      {drawMode && (
         <div className="mode-banner">
-          {lineMode ? 'Click two cards to connect them' : 'Draw anywhere on the board'}
-          <button onClick={() => { useView.getState().setLineMode(false); useView.getState().setDrawMode(false); }}>
+          Draw anywhere on the board
+          <button onClick={() => useView.getState().setDrawMode(false)}>
             Done · Esc
           </button>
         </div>

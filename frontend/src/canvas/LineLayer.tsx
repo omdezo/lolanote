@@ -22,7 +22,8 @@ interface EndInfo extends Pt { w: number; h: number; free: boolean }
 
 type HandleDrag =
   | { lineId: string; kind: 'from' | 'to'; x: number; y: number }
-  | { lineId: string; kind: 'curve'; value: number };
+  | { lineId: string; kind: 'curve'; value: number }
+  | { lineId: string; kind: 'body'; dx: number; dy: number };
 
 export function LineLayer() {
   const { boardId, elements, selection, select, commitTransaction } = useBoard();
@@ -81,8 +82,48 @@ export function LineLayer() {
       return null; // connected element gone
     }
     const pt = line.content?.[side === 'from' ? 'fromPoint' : 'toPoint'];
-    if (pt && typeof pt.x === 'number') return { x: pt.x, y: pt.y, w: 0, h: 0, free: true };
+    if (pt && typeof pt.x === 'number') {
+      // A body drag shifts free endpoints live (connected ends stay anchored).
+      const body = handleDrag?.lineId === line.id && handleDrag.kind === 'body' ? handleDrag : null;
+      return { x: pt.x + (body?.dx ?? 0), y: pt.y + (body?.dy ?? 0), w: 0, h: 0, free: true };
+    }
     return null;
+  };
+
+  // startBodyDrag moves a line by its body — free endpoints translate with
+  // the pointer (a fully free line moves whole, like any card); connected
+  // endpoints stay anchored to their cards.
+  const startBodyDrag = (e: React.PointerEvent, line: QElement) => {
+    const hasFree = !line.content?.fromId || !line.content?.toId;
+    if (!hasFree) return;
+    const viewport = document.querySelector('.canvas-viewport') as HTMLElement | null;
+    if (!viewport) return;
+    const start = useView.getState().toCanvas(e.clientX, e.clientY, viewport);
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);
+      const dx = pt.x - start.x, dy = pt.y - start.y;
+      if (!moved && Math.hypot(dx, dy) > 4) moved = true;
+      if (moved) setHandleDrag({ lineId: line.id, kind: 'body', dx, dy });
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setHandleDrag(null);
+      if (!moved) return;
+      const pt = useView.getState().toCanvas(ev.clientX, ev.clientY, viewport);
+      const dx = pt.x - start.x, dy = pt.y - start.y;
+      const patch: Record<string, any> = {};
+      const fp = line.content?.fromPoint, tp = line.content?.toPoint;
+      if (!line.content?.fromId && fp) patch.fromPoint = { x: fp.x + dx, y: fp.y + dy };
+      if (!line.content?.toId && tp) patch.toPoint = { x: tp.x + dx, y: tp.y + dy };
+      if (Object.keys(patch).length) {
+        void useBoard.getState().commitTransaction([updateOp(line, { content: patch })]);
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   };
 
   // trim pulls an element endpoint back to the card edge along the axis.
@@ -194,7 +235,11 @@ export function LineLayer() {
           fill="none"
           stroke="transparent"
           strokeWidth={16}
-          onPointerDown={(e) => { e.stopPropagation(); select([line.id], e.shiftKey); }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            select([line.id], e.shiftKey);
+            startBodyDrag(e, line);
+          }}
           onDoubleClick={async (e) => {
             e.stopPropagation();
             const label = await prompt({ title: 'Line label', defaultValue: line.content?.label ?? '', placeholder: 'Label this connection', confirmLabel: 'Set label' });

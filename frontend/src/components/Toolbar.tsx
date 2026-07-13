@@ -18,7 +18,7 @@ import {
 
 export function Toolbar() {
   const { boardId, commitTransaction } = useBoard();
-  const { lineMode, setLineMode, drawMode, setDrawMode } = useView();
+  const { drawMode, setDrawMode } = useView();
   // Settings → Toolbar options decides which tools render; subscribing to
   // the settings slice also keeps the t() labels live on language change.
   const hiddenTools = useSettings((s) => s.settings.toolbar.hiddenTools);
@@ -127,6 +127,22 @@ export function Toolbar() {
     if (anyFileInput.current) anyFileInput.current.value = '';
   };
 
+  // A line drops onto the canvas like any other element: a free-standing
+  // diagonal with two loose endpoints, selected so its handles are live —
+  // connect either end to a card by dragging the handle onto it (or don't).
+  const addLine = () => {
+    const pt = dropPoint();
+    const op = createOp('LINE', boardId, {
+      content: {
+        fromPoint: { x: pt.x + 30, y: pt.y + 190 },
+        toPoint: { x: pt.x + 240, y: pt.y + 20 },
+        color: '#8a86a0', weight: 2, endArrow: true, curve: 0, label: '',
+      },
+    });
+    void commitTransaction([op]);
+    useBoard.getState().select([op.elementId]);
+  };
+
   const emptyDoc = (text = '') =>
     text
       ? { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
@@ -136,7 +152,7 @@ export function Toolbar() {
     { id: 'note', icon: <NoteIcon />, label: t('tool.note'), onClick: () => add('CARD', { doc: null, textPreview: '' }, 300, true) },
     { id: 'link', icon: <LinkIcon />, label: t('tool.link'), onClick: () => void addLink() },
     { id: 'todo', icon: <TodoIcon />, label: t('tool.todo'), onClick: () => add('TASK_LIST', { title: '' }) },
-    { id: 'line', icon: <LineIcon />, label: t('tool.line'), onClick: () => setLineMode(!lineMode), active: lineMode },
+    { id: 'line', icon: <LineIcon />, label: t('tool.line'), onClick: addLine },
     { id: 'board', icon: <BoardIcon />, label: t('tool.board'), onClick: () => add('BOARD', { title: 'New board' }) },
     { id: 'column', icon: <ColumnIcon />, label: t('tool.column'), onClick: () => add('COLUMN', { title: '', collapsed: false }) },
     { id: 'comment', icon: <CommentIcon />, label: t('tool.comment'), onClick: () => add('COMMENT_THREAD', {}) },
@@ -156,7 +172,7 @@ export function Toolbar() {
   return (
     <div className="rail" onPointerDown={(e) => e.stopPropagation()}>
       {mainTools.map((tool) => (
-        <button key={tool.id} className={`rail-btn${tool.active ? ' active' : ''}`} onClick={tool.onClick}>
+        <button key={tool.id} className="rail-btn" onClick={tool.onClick}>
           {tool.icon}
           <span>{tool.label}</span>
         </button>
