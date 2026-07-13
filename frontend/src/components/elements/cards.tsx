@@ -60,7 +60,7 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   const tileGlyph = tileImg
     ? <img className="tile-img" src={tileImg} alt="" draggable={false} />
     : LucideGlyph
-      ? <LucideGlyph className="tile-glyph" strokeWidth={1.7} />
+      ? <LucideGlyph className="tile-glyph" strokeWidth={2.1} />
       : tileIcon
         ? <span className={`tile-icon${isLetterIcon(tileIcon) ? ' tile-letter' : ''}`}>{tileIcon}</span>
         : null;

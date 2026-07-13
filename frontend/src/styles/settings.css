@@ -398,3 +398,35 @@
 .line-handle-halo { fill: transparent; cursor: grab; pointer-events: auto; }
 .el.connect-target { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-2); }
 .el.connect-target .tile { transform: scale(1.04); }
+
+/* ============ Premium icon picker chips ============ */
+.icon-picker { min-height: 296px; }
+.ip-grid-wrap { max-height: 296px; padding: 2px; }
+.ip-grid { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 7px; }
+.ip-cell {
+  height: 46px; border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: transform 0.12s var(--ease), box-shadow 0.12s var(--ease), background 0.12s var(--ease);
+}
+.ip-cell:hover {
+  background: var(--surface);
+  transform: translateY(-1.5px) scale(1.05);
+  box-shadow: inset 0 0 0 1px var(--hairline), 0 4px 12px rgba(0,0,0,0.14);
+}
+.ip-cell.on {
+  background: var(--accent);
+  box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.45);
+}
+.ip-cell svg { color: var(--ink-2); }
+.ip-cell:hover svg { color: var(--ink); }
+.ip-cell.on svg { color: #fff; }
+.ip-cell.ip-letter { font-size: 17px; }
+.ip-cell.ip-letter.on { color: #fff; }
+
+/* Tile glyph: a touch of depth so it reads "engraved" on the color */
+.tile .tile-glyph {
+  width: 36px; height: 36px; color: #fff;
+  filter: drop-shadow(0 1.5px 2px rgba(0, 0, 0, 0.28));
+}
+.row-tile .tile-glyph { width: 23px; height: 23px; }

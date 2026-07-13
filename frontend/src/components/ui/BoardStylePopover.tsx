@@ -176,7 +176,7 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
                     title={entry.name}
                     onClick={() => onPick(entry.name)}
                   >
-                    <Glyph size={19} strokeWidth={1.8} />
+                    <Glyph size={21} strokeWidth={2.1} absoluteStrokeWidth />
                   </button>
                 );
               })}
