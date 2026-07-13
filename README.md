@@ -84,6 +84,8 @@ make dev-web    # Vite dev server on :5173 (proxies /api and /ws)
 | Export | topbar ⬇ — Markdown/plain-text linearization |
 | Trash | topbar 🗑 — restore, delete forever, empty |
 | Due dates & reminders | task row 📅 — pick a due date and a reminder time; reminders arrive as notifications |
+| Text direction | automatic per paragraph/field from the first letter (Arabic → RTL); override per element via right-click → Text direction, or the ↔ button in the note format bar |
+| Arabic numerals | typing digits inside Arabic text produces ٠١٢٣٤٥٦٧٨٩ automatically; Latin context keeps 0-9 |
 | Settings | avatar menu → **Settings** — account, notifications, appearance, preferences, localization, toolbar, privacy |
 
 ## Settings

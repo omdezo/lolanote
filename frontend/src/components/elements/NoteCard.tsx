@@ -8,7 +8,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { QElement } from '../../api/types';
 import { t } from '../../i18n';
-import { cycleDir, elementDir, type TextDirection } from '../../lib/direction';
+import { cycleDir, elementDir, smartDigitsTextInput, type TextDirection } from '../../lib/direction';
 import { sendEditing } from '../../realtime/socket';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
@@ -37,6 +37,8 @@ export function NoteCard({ element, cloneShellId }: Props) {
     ],
     content: element.content?.doc ?? '',
     editable: false,
+    // Typing digits inside Arabic text produces Arabic-Indic numerals.
+    editorProps: { handleTextInput: smartDigitsTextInput },
     onBlur: ({ editor }) => {
       useView.getState().setEditing(null);
       editor.setEditable(false);

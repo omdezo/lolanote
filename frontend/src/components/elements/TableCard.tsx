@@ -5,7 +5,7 @@
 // this is a clean-room grid with the formula engine as a future extension.)
 import { useState } from 'react';
 import type { QElement } from '../../api/types';
-import { dirAttr, elementDir } from '../../lib/direction';
+import { dirAttr, elementDir, normalizeDigits } from '../../lib/direction';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { MinusIcon, PlusIcon } from '../Icons';
 
@@ -37,7 +37,8 @@ export function TableCard({ element }: { element: QElement }) {
   const delRow = () => cells.length > 1 && commitCells(cells.slice(0, -1).map((r) => [...r]));
   const delCol = () => cells[0].length > 1 && commitCells(cells.map((r) => r.slice(0, -1)));
 
-  const isNumeric = (v: string) => v !== '' && !Number.isNaN(Number(v.replace(/[,%$€£]/g, '')));
+  // Numeric detection understands Arabic-Indic (٠-٩) digits too.
+  const isNumeric = (v: string) => v !== '' && !Number.isNaN(Number(normalizeDigits(v).replace(/[,%$€£]/g, '')));
 
   return (
     <div className="table-card">

@@ -7,7 +7,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { QElement } from '../../api/types';
-import { dirAttr, elementDir } from '../../lib/direction';
+import { dirAttr, elementDir, smartDigitsTextInput } from '../../lib/direction';
 import { sendEditing } from '../../realtime/socket';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { CheckIcon, DocumentIcon } from '../Icons';
@@ -36,6 +36,8 @@ function DocumentEditor({ element, onClose }: { element: QElement; onClose: () =
     extensions: [StarterKit, Placeholder.configure({ placeholder: 'Start writing…' })],
     content: element.content?.doc ?? '',
     autofocus: 'end',
+    // Typing digits inside Arabic text produces Arabic-Indic numerals.
+    editorProps: { handleTextInput: smartDigitsTextInput },
   });
 
   useEffect(() => {
