@@ -203,6 +203,17 @@ export type AgentRunState =
   | 'COMPLETED' | 'PARTIAL' | 'DISCARDED' | 'CANCELLED' | 'FAILED' | 'DENIED'
   | 'BUDGET_EXHAUSTED' | 'SECURITY_QUARANTINED' | 'REVERTED';
 
+/** One change the agent actually made on a board. */
+export interface AgentAuditEntry {
+  runId: string;
+  intent: string;
+  at: string;
+  ops: number;
+  reverted: boolean;
+  costUsd: number;
+  state: AgentRunState;
+}
+
 export type AgentActionKind =
   | 'create_board' | 'create_column' | 'create_note' | 'create_todo'
   | 'create_link' | 'move_element' | 'rename' | 'set_note_text' | 'delete_element'

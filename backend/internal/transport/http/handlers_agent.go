@@ -121,6 +121,19 @@ func (h *Handlers) DiscardAgentRun(c echo.Context) error {
 	return c.JSON(http.StatusOK, run)
 }
 
+// AuditAgentBoard answers "what has the AI changed on this board".
+func (h *Handlers) AuditAgentBoard(c echo.Context) error {
+	if h.Agent == nil {
+		return domain.ErrUnavailable
+	}
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	entries, err := h.Agent.Audit(c.Request().Context(), principal(c), c.Param("id"), limit)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, entries)
+}
+
 // RefineAgentRun sends a proposed plan back for another pass with the person's
 // steer. The run keeps its identity and its cost meter, so what the user sees
 // is the price of the conversation, not of its last turn.

@@ -36,6 +36,7 @@ type Service struct {
 	labels   domain.LabelRepository
 	comments domain.CommentRepository
 	images   ImageFetcher
+	links    LinkResolver
 	runs     RunStore
 	events   EventStore
 	provider cognition.Provider
@@ -58,6 +59,7 @@ type Config struct {
 	Labels      domain.LabelRepository
 	Comments    domain.CommentRepository
 	Images      ImageFetcher
+	Links       LinkResolver
 	Runs        RunStore
 	Events      EventStore
 	Provider    cognition.Provider
@@ -76,6 +78,7 @@ func NewService(cfg Config) *Service {
 		labels:      cfg.Labels,
 		comments:    cfg.Comments,
 		images:      cfg.Images,
+		links:       cfg.Links,
 		users:       cfg.Users,
 		txns:        cfg.Txns,
 		txnRepo:     cfg.TxnRepo,
@@ -280,7 +283,7 @@ func (s *Service) execute(ctx context.Context, p *domain.Principal, runID string
 	}
 
 	emit := func(t EventType, msg string, data map[string]any) { s.emit(ctx, run, t, msg, data) }
-	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels, s.txnRepo, s.images).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
+	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels, s.txnRepo, s.images, s.links).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
 	run.Usage.Add(usage)
 	if err != nil {
 		s.finishWithReason(ctx, run, terminalFor(err), reasonFor(err))
@@ -588,6 +591,59 @@ func (s *Service) Refine(ctx context.Context, p *domain.Principal, runID, note s
 // maxRefinements bounds one conversation. Past a handful of passes the honest
 // advice is to start again with a clearer request, not to keep nudging.
 const maxRefinements = 5
+
+// AuditEntry is one change the agent made on a board, in the terms a person
+// would ask about it.
+type AuditEntry struct {
+	RunID    string    `json:"runId"`
+	Intent   string    `json:"intent"`
+	At       time.Time `json:"at"`
+	Ops      int       `json:"ops"`
+	Reverted bool      `json:"reverted"`
+	CostUSD  float64   `json:"costUsd"`
+	State    RunState  `json:"state"`
+}
+
+// Audit answers "what has the AI changed here", which every transaction has
+// recorded since the agent shipped and nothing has ever surfaced. Trust in an
+// agent is mostly the ability to check up on it afterwards.
+func (s *Service) Audit(ctx context.Context, p *domain.Principal, boardID string, limit int) ([]AuditEntry, error) {
+	if _, _, err := s.access.RequireView(ctx, boardID, p); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	runs, err := s.runs.ListByBoard(ctx, p.Sub, boardID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEntry, 0, len(runs))
+	for _, r := range runs {
+		// Only runs that actually wrote something. A discarded preview changed
+		// nothing, and listing it as a change is exactly the noise that makes
+		// an audit log stop being read.
+		if r.State != StateCompleted && r.State != StateReverted && r.State != StatePartial {
+			continue
+		}
+		ops := 0
+		if r.Plan != nil {
+			ops = len(r.Plan.Actions)
+		}
+		if ops == 0 {
+			continue
+		}
+		at := r.UpdatedAt
+		if r.CompletedAt != nil {
+			at = *r.CompletedAt
+		}
+		out = append(out, AuditEntry{
+			RunID: r.ID, Intent: r.Task.Intent, At: at, Ops: ops,
+			Reverted: r.State == StateReverted, CostUSD: r.Usage.CostUSD, State: r.State,
+		})
+	}
+	return out, nil
+}
 
 // Cancel stops a run. In preview mode nothing has been written, so cancellation
 // is total; after a commit the user wants Revert instead.

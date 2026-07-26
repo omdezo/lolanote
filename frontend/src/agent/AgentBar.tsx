@@ -92,6 +92,7 @@ const scopeLabel = (s: AgentScope) =>
 function Ask() {
   const busy = useAgent((s) => s.busy);
   const recent = useAgent((s) => s.recent);
+  const audit = useAgent((s) => s.audit);
   const { boardId, elements, selection } = useBoard();
   const [intent, setIntent] = useState('');
   const [autonomy, setAutonomy] = useState<AgentAutonomy>('preview');
@@ -176,6 +177,21 @@ function Ask() {
               <button onClick={async () => { useAgent.setState({ run: r }); await useAgent.getState().revert(); }}>
                 Undo
               </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* What the agent has already changed here. Shown only when there is
+          something to show, and only before you start typing. */}
+      {!intent && revertible.length === 0 && audit.length > 0 && (
+        <div className="ac-recent">
+          {audit.slice(0, 2).map((a) => (
+            <div key={a.runId} className="ac-recent-row">
+              <span title={a.intent}>{a.intent}</span>
+              <em className="ac-audit-note">
+                {a.reverted ? 'reverted' : `${a.ops} change${a.ops === 1 ? '' : 's'}`}
+              </em>
             </div>
           ))}
         </div>

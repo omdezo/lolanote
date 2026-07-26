@@ -10,6 +10,7 @@ import (
 
 	"qomranote/backend/internal/agent/cognition"
 	"qomranote/backend/internal/domain"
+	"qomranote/backend/internal/service"
 )
 
 // The capability plane: the typed operations the model may ask for.
@@ -45,6 +46,7 @@ const (
 	toolLook         = "look_at"
 	toolClone        = "clone_here"
 	toolComment      = "comment"
+	toolReadURL      = "read_url"
 	toolAssign       = "set_assignee"
 	toolRemind       = "set_reminder"
 	toolResize       = "resize"
@@ -68,6 +70,10 @@ const maxNewLabelsPerRun = 4
 // maxConnectionsPerRun keeps a relationship map readable. Roughly one line per
 // two elements is the point past which a diagram stops explaining anything.
 const maxConnectionsPerRun = 12
+
+// maxURLsPerRun bounds outbound fetches. Each one is a request this server makes
+// on the user's behalf to somewhere it does not control.
+const maxURLsPerRun = 5
 
 // maxToolOutputBytes bounds one observation. An unbounded read would let board
 // content crowd out the instructions.
@@ -365,6 +371,12 @@ type staging struct {
 	images        ImageFetcher
 	imagesSeen    int
 	pendingImages []cognition.ImagePart
+	// placedThisRun / movedThisRun catch a plan arguing with itself while it is
+	// still being built.
+	placedThisRun map[string]bool
+	movedThisRun  map[string]bool
+	links         LinkResolver
+	urlsRead      int
 	connections   int
 	commented     bool
 	asked         bool
@@ -376,9 +388,9 @@ type staging struct {
 	everFinished bool
 }
 
-func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher, emit emitFunc) *staging {
+func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher, links LinkResolver, emit emitFunc) *staging {
 	return &staging{
-		runID: runID, scope: scope, task: task, elements: elements, labels: labels, txns: txns, images: images, emit: emit,
+		runID: runID, scope: scope, task: task, elements: elements, labels: labels, txns: txns, images: images, links: links, emit: emit,
 		plan: &Plan{}, created: map[string]ActionKind{}, failedCalls: map[string]int{},
 	}
 }
@@ -636,6 +648,27 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		s.pendingImages = append(s.pendingImages, cognition.ImagePart{MediaType: mediaType, Data: data})
 		return out(fmt.Sprintf("Attached %s — it is included with this turn, so describe what you see and use it.",
 			truncate(sanitizeName(contentStr(el.Content, "filename")), 60)))
+
+	case toolReadURL:
+		if s.links == nil {
+			return fail("link previews are not available here")
+		}
+		raw := strings.TrimSpace(in.URL)
+		if raw == "" {
+			return fail("that needs a URL")
+		}
+		if s.urlsRead >= maxURLsPerRun {
+			return fail("that is enough pages for one run (%d)", maxURLsPerRun)
+		}
+		meta, err := s.links.Resolve(ctx, raw)
+		if err != nil {
+			return fail("could not read that page")
+		}
+		s.urlsRead++
+		// Whatever comes back is ⟨web⟩: a page title is content someone else
+		// wrote, and it is labelled as such wherever it lands.
+		return out(fmt.Sprintf("⟨web⟩ %s — %s",
+			truncate(sanitizeText(meta.Title), 120), truncate(sanitizeText(meta.Description), 240)))
 
 	case toolTree:
 		tree, elided, err := s.renderTree(ctx, s.scope.Board.ID, 0)
@@ -1097,6 +1130,13 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		if err != nil {
 			return fail("%v", err)
 		}
+		// Refuse HERE rather than letting the plan reach validation and fail as
+		// a whole. Rejecting a finished plan tells the model nothing it can act
+		// on; refusing the call tells it now, while it can still choose.
+		if s.placedThisRun[el.ID] {
+			return fail("you already positioned %s on the canvas this run. Filing it into a "+
+				"container would undo that. Do one job: either compose the canvas or restructure it.", el.ID)
+		}
 		if el.Type == domain.TypeLine {
 			return fail("connector lines follow the cards they join; they are not moved directly")
 		}
@@ -1384,6 +1424,9 @@ func (s *staging) canDelete() bool { return s.task.Autonomy == AutonomyPreview }
 // row in the review list and an op in the transaction, and a "tidy" that
 // reports forty changes when it moved three is a plan nobody can check.
 func (s *staging) stagePlacements(ids []string, boxes map[string]ColumnBox) error {
+	if s.placedThisRun == nil {
+		s.placedThisRun = map[string]bool{}
+	}
 	staged := 0
 	for _, id := range ids {
 		box, ok := boxes[id]
@@ -1395,6 +1438,13 @@ func (s *staging) stagePlacements(ids []string, boxes map[string]ColumnBox) erro
 				continue
 			}
 		}
+		if s.movedThisRun[id] {
+			// The mirror of the check in toolMove: composing something the run
+			// has already re-filed is the same contradiction from the other end.
+			return fmt.Errorf("%s was already filed into a container this run; positioning it "+
+				"on the canvas would undo that", id)
+		}
+		s.placedThisRun[id] = true
 		pos := box
 		if _, err := s.add(Action{
 			Kind: ActPlace, ElementID: id, Position: &pos,
@@ -1430,4 +1480,11 @@ func (s *staging) looseOnCanvas() []string {
 	}
 	sort.Strings(out) // deterministic, then reordered into reading order by the packer
 	return out
+}
+
+// LinkResolver fetches page metadata. An interface so the agent depends on
+// "can I find out what this page is" rather than on the HTTP client that does
+// it — and so a test answers without touching the network.
+type LinkResolver interface {
+	Resolve(ctx context.Context, rawURL string) (*service.LinkMetadata, error)
 }

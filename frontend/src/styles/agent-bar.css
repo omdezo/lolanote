@@ -418,3 +418,12 @@
 }
 .ac-answer:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .ac-answer:disabled { opacity: 0.5; cursor: default; }
+
+/* An audit line: what the agent already did here, stated quietly. */
+.ac-audit-note {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-3);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

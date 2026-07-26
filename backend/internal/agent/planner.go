@@ -174,11 +174,12 @@ type Planner struct {
 	labels   domain.LabelRepository
 	txns     domain.TransactionRepository
 	images   ImageFetcher
+	links    LinkResolver
 }
 
 // NewPlanner constructs the loop.
-func NewPlanner(p cognition.Provider, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher) *Planner {
-	return &Planner{provider: p, elements: elements, labels: labels, txns: txns, images: images}
+func NewPlanner(p cognition.Provider, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher, links LinkResolver) *Planner {
+	return &Planner{provider: p, elements: elements, labels: labels, txns: txns, images: images, links: links}
 }
 
 // emitFunc records a journal event. The loop emits rather than logs so security
@@ -189,7 +190,7 @@ type emitFunc func(EventType, string, map[string]any)
 func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, runID string, emit emitFunc, prior *Plan) (*Plan, cognition.Usage, error) {
 	var usage cognition.Usage
 
-	stage := newStaging(runID, scope, task, pl.elements, pl.labels, pl.txns, pl.images, emit)
+	stage := newStaging(runID, scope, task, pl.elements, pl.labels, pl.txns, pl.images, pl.links, emit)
 	// Deletes are offered only when the run may actually make them. An
 	// unattended run never sees the capability, so it cannot reach for it.
 	// Label tools appear only where labels can actually be resolved, so a

@@ -103,6 +103,28 @@ func (h *harness) seedBoard(t *testing.T, board string, texts ...string) []strin
 	return ids
 }
 
+// seedScattered builds a board with loose, overlapping canvas cards — the shape
+// a composition request acts on. Without geometry the arrange tools refuse
+// everything and a tool-choice eval cannot distinguish right from wrong.
+func (h *harness) seedScattered(t *testing.T, board string) {
+	t.Helper()
+	h.seedBoard(t, board, "a note", "another note")
+	now := time.Now().UTC()
+	for i, p := range [][2]float64{{10, 10}, {24, 22}, {320, 15}} {
+		if err := h.elements.Insert(context.Background(), &domain.Element{
+			ID: fmt.Sprintf("%sx%03d", board[:20], i), Type: domain.TypeCard,
+			Location: domain.Location{
+				ParentID: board, Section: domain.SectionCanvas,
+				Position: domain.Point{X: p[0], Y: p[1]}, Width: 280, Height: 120,
+			},
+			Content:   domain.Content{"textPreview": fmt.Sprintf("scattered %d", i)},
+			CreatedBy: owner, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("seed scattered: %v", err)
+		}
+	}
+}
+
 // awaitPlan polls until the run's plan holds exactly n actions. Refinement
 // re-enters PROPOSED from PROPOSED, so a state-only wait observes the previous
 // pass and passes for the wrong reason.

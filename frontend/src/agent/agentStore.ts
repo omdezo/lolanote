@@ -17,7 +17,7 @@ import { create } from 'zustand';
 import { api, ApiError } from '../api/client';
 import type {
   AgentAction, AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent,
-  AgentPlan, AgentRun, AgentRunState, AgentScope,
+  AgentAuditEntry, AgentPlan, AgentRun, AgentRunState, AgentScope,
 } from '../api/types';
 import { useBoard } from '../store/boardStore';
 import { toast } from '../components/ui/Toaster';
@@ -39,6 +39,9 @@ interface AgentState {
   start(opts: { intent: string; scope: AgentScope; autonomy: AgentAutonomy; selectionIds?: string[] }): Promise<void>;
   ingest(ev: AgentEvent & { state?: AgentRunState }): void;
   loadRecent(): Promise<void>;
+  /** What the agent has actually changed on this board. */
+  audit: AgentAuditEntry[];
+  loadAudit(): Promise<void>;
   setHover(seq: number | null): void;
   resync(): Promise<void>;
   adjust(a: AgentAdjustment): void;
@@ -67,6 +70,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   hoverSeq: null,
   recent: [],
   pendingScope: null,
+  audit: [],
 
   async loadCapabilities() {
     try {
@@ -216,6 +220,19 @@ export const useAgent = create<AgentState>((set, get) => ({
     } catch { set({ recent: [] }); }
   },
 
+  /**
+   * Every transaction has recorded its origin since the agent shipped; nothing
+   * ever surfaced it. Trust in an agent is mostly being able to check up on it
+   * afterwards.
+   */
+  async loadAudit() {
+    const boardId = useBoard.getState().boardId;
+    if (!boardId) return;
+    try {
+      set({ audit: (await api.agentAudit(boardId)) ?? [] });
+    } catch { set({ audit: [] }); }
+  },
+
   setHover(hoverSeq) { set({ hoverSeq }); },
 
   dismiss() {
@@ -224,7 +241,10 @@ export const useAgent = create<AgentState>((set, get) => ({
   },
   setOpen(open, scope) {
     set({ open, pendingScope: scope ?? null });
-    if (open) void get().loadRecent();
+    if (open) {
+      void get().loadRecent();
+      void get().loadAudit();
+    }
   },
 }));
 
