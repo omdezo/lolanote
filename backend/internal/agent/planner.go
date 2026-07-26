@@ -369,7 +369,7 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 	if stage.question != nil {
 		stage.plan.Question = stage.question
 		stage.plan.Fingerprint = scope.Fingerprint(nil)
-		return stage.plan, usage, nil
+		return stage.plan.EnsureShape(), usage, nil
 	}
 	if len(stage.plan.Actions) == 0 {
 		// Reporting is a legitimate outcome, and half the useful things an agent
@@ -378,7 +378,7 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 		// staged makes those requests silently produce nothing at all.
 		if stage.plan.Summary != "" {
 			stage.plan.Fingerprint = scope.Fingerprint(nil)
-			return stage.plan, usage, nil
+			return stage.plan.EnsureShape(), usage, nil
 		}
 		return nil, usage, ErrNothingToDo
 	}
@@ -386,7 +386,7 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 	// Geometry is assigned by the server so preview and commit cannot disagree.
 	LayoutPlan(stage.plan, scope)
 	stage.plan.Fingerprint = scope.Fingerprint(stage.plan.TargetIDs())
-	return stage.plan, usage, nil
+	return stage.plan.EnsureShape(), usage, nil
 }
 
 // openingMessage is the volatile half of the context: what the person asked

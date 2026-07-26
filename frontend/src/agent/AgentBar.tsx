@@ -520,7 +520,7 @@ function PlanList({ plan }: { plan: NonNullable<AgentRun['plan']> }) {
   const kept = new Set(effective.actions.map((a) => a.seq));
   return (
     <ol className="ac-plan">
-      {plan.actions.map((a) => (
+      {(plan.actions ?? []).map((a) => (
         <PlanRow
           key={a.seq}
           action={effective.actions.find((e) => e.seq === a.seq) ?? a}

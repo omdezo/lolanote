@@ -61,6 +61,22 @@ interface AgentState {
   setOpen(open: boolean, scope?: AgentScope): void;
 }
 
+/**
+ * A run as it arrives from the server, made safe to render.
+ *
+ * A plan with no actions is a legitimate outcome — an answer to a question, or
+ * a question of its own — and Go marshals an empty slice as `null`. Normalizing
+ * once, at the single point every run enters this store, is the difference
+ * between one defensive line and a null check at every call site that will be
+ * forgotten the next time somebody adds one.
+ */
+function safeRun(run: AgentRun | null): AgentRun | null {
+  if (run?.plan && !Array.isArray(run.plan.actions)) {
+    return { ...run, plan: { ...run.plan, actions: [] } };
+  }
+  return run;
+}
+
 /** Boards the user waved off this session. Persisting it would be worse: a
  *  board that drifts again later genuinely is worth mentioning again. */
 const dismissedBoards = new Set<string>();
@@ -97,7 +113,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({ busy: true, events: [], adjustments: [], hoverSeq: null });
     try {
       const run = await api.agentCreateRun({ boardId, intent: intent.trim(), scope, autonomy, selectionIds, attachmentIds });
-      set({ run, busy: false });
+      set({ run: safeRun(run), busy: false });
     } catch (err) {
       set({ busy: false });
       const e = err as ApiError;
@@ -130,7 +146,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (!run) return;
     try {
       const [fresh, events] = await Promise.all([api.agentRun(run.id), api.agentEvents(run.id, 0)]);
-      set({ run: fresh, events });
+      set({ run: safeRun(fresh), events });
     } catch { /* the panel keeps showing what it has */ }
   },
 
@@ -145,7 +161,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({ busy: true });
     try {
       const applied = await api.agentApply(run.id, adjustments);
-      set({ run: applied, busy: false, adjustments: [] });
+      set({ run: safeRun(applied), busy: false, adjustments: [] });
       // The agent's transaction arrives over the board socket like any other,
       // so the canvas updates itself. This refresh covers the case where the
       // socket is down and the user would otherwise see a stale board.
@@ -178,7 +194,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const next = await api.agentRefine(run.id, note.trim());
       // Adjustments belonged to the plan being replaced; carrying them over
       // would silently re-apply edits to actions that no longer exist.
-      set({ run: next, busy: false, adjustments: [], hoverSeq: null });
+      set({ run: safeRun(next), busy: false, adjustments: [], hoverSeq: null });
     } catch (err) {
       set({ busy: false });
       toast.error((err as ApiError)?.message || 'Could not revise.');
@@ -210,7 +226,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({ busy: true });
     try {
       const reverted = await api.agentRevert(run.id);
-      set({ run: reverted, busy: false });
+      set({ run: safeRun(reverted), busy: false });
       void useBoard.getState().refreshBoard();
       // No toast: the bar reports the outcome inline, and a toast at the bottom
       // centre lands directly on top of it — the same sentence, twice, with the
@@ -225,7 +241,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const boardId = useBoard.getState().boardId;
     if (!boardId) return;
     try {
-      set({ recent: (await api.agentRuns(boardId, 6)) ?? [] });
+      set({ recent: ((await api.agentRuns(boardId, 6)) ?? []).map((r) => safeRun(r)!) });
     } catch { set({ recent: [] }); }
   },
 
@@ -297,12 +313,16 @@ export function computeEffective(
   adjustments: AgentAdjustment[],
 ): EffectivePlan | null {
   if (!plan) return null;
+  // Exported, so it is reachable with a plan that never passed through the
+  // store's normalizer. An answer with no changes serializes actions as null,
+  // and this walks them several times below.
+  if (!Array.isArray(plan.actions)) plan = { ...plan, actions: [] };
 
   const dropped = new Set<number>();
   const retitle = new Map<number, string>();
   const retext = new Map<number, string>();
   for (const a of adjustments) {
-    if (a.seq < 0 || a.seq >= plan.actions.length) continue;
+    if (a.seq < 0 || a.seq >= (plan.actions?.length ?? 0)) continue;
     if (a.kind === 'drop') dropped.add(a.seq);
     if (a.kind === 'retitle') retitle.set(a.seq, a.value);
     if (a.kind === 'retext') retext.set(a.seq, a.value);

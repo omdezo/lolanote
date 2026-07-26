@@ -496,5 +496,6 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 		out.Actions = append(out.Actions, a)
 	}
 	LayoutPlan(out, scope)
+	out.EnsureShape()
 	return out
 }

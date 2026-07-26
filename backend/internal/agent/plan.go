@@ -195,6 +195,23 @@ type Plan struct {
 	Question *Question `bson:"question,omitempty" json:"question,omitempty"`
 }
 
+// EnsureShape guarantees a plan serializes into the shape clients expect.
+//
+// Go marshals a nil slice as `null`, not `[]`. A plan with no actions is a
+// legitimate outcome — an answer, or a question — and every client that
+// iterates plan.actions crashes on null. The empty case is the one worth being
+// careful about precisely because it is the rare one: it ships untested and
+// takes the whole surface down when it finally happens.
+func (p *Plan) EnsureShape() *Plan {
+	if p == nil {
+		return nil
+	}
+	if p.Actions == nil {
+		p.Actions = []Action{}
+	}
+	return p
+}
+
 // Destructive reports whether any action loses information.
 func (p *Plan) Destructive() bool {
 	for _, a := range p.Actions {

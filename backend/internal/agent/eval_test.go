@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -622,5 +623,36 @@ func TestDigest_ImagesAreIdentifiableAndAdvertiseLookAt(t *testing.T) {
 	}
 	if !strings.Contains(out, "brief.pdf") {
 		t.Errorf("a named file lost its filename:\n%s", out)
+	}
+}
+
+// A plan with no actions is a legitimate outcome — an answer, or a question —
+// and Go marshals a nil slice as `null`. Every client that iterates
+// plan.actions then crashes, which is precisely what happened: the empty case
+// is rare, so it shipped untested and took the whole surface down the first
+// time somebody asked a question instead of requesting a change.
+func TestPlan_EmptyActionsSerializeAsArrayNotNull(t *testing.T) {
+	answer := (&agent.Plan{Summary: "Nothing is missing."}).EnsureShape()
+
+	raw, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"actions":null`) {
+		t.Fatalf("an empty plan serialized actions as null, which crashes every consumer:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), `"actions":[]`) {
+		t.Errorf("expected an empty array:\n%s", raw)
+	}
+
+	// And it must be a no-op on a plan that already has actions.
+	full := (&agent.Plan{Actions: []agent.Action{{Seq: 0, Kind: agent.ActCreateNote, Text: "x"}}}).EnsureShape()
+	if len(full.Actions) != 1 {
+		t.Errorf("EnsureShape altered a populated plan: %d actions", len(full.Actions))
+	}
+	// Nil in, nil out — never a panic.
+	var none *agent.Plan
+	if none.EnsureShape() != nil {
+		t.Error("EnsureShape invented a plan from nil")
 	}
 }
