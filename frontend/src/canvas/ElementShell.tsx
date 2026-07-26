@@ -15,10 +15,11 @@ import { highlightConnectTarget } from './LineLayer';
 import { ElementView } from '../components/elements/ElementView';
 import {
   AliasArrow, BoardIcon, ColumnIcon, DirAutoIcon, DirLtrIcon, DirRtlIcon, DuplicateIcon,
-  LabelIcon, LockIcon, PaletteIcon, RenameIcon, SyncIcon, TemplateIcon, TrashIcon,
+  LabelIcon, LockIcon, PaletteIcon, RenameIcon, SparkleIcon, SyncIcon, TemplateIcon, TrashIcon,
 } from '../components/Icons';
 import { useBoardStyle } from '../components/ui/BoardStylePopover';
 import { useContextMenu } from '../components/ui/ContextMenu';
+import { useAgent } from '../agent/agentStore';
 import { LabelChips, useLabelPopover } from '../components/ui/LabelPopover';
 import { prompt } from '../components/ui/Prompt';
 import { toast } from '../components/ui/Toaster';
@@ -284,6 +285,14 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
         label: element.content?.isTemplate ? 'Remove from templates' : 'Convert to template',
         icon: <TemplateIcon size={15} />,
         onClick: () => void state.commitTransaction([updateOp(element, { content: { isTemplate: element.content?.isTemplate ? null : true } })]),
+      }] : []),
+      // Pointing at what you mean beats describing it. The agent already has a
+      // "selection" scope; this is the entry point that made it reachable.
+      ...(useAgent.getState().capabilities?.enabled ? [{
+        label: multi ? `Ask Qomra about these ${state.selection.size}` : 'Ask Qomra about this',
+        icon: <SparkleIcon size={15} />,
+        divider: true,
+        onClick: () => useAgent.getState().setOpen(true, 'selection'),
       }] : []),
       { label: 'Delete', icon: <TrashIcon size={15} />, danger: true, divider: true, onClick: onDelete },
     ];

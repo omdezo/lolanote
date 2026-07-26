@@ -60,13 +60,22 @@ const (
 	// NOT a create, so it never goes through the create-time layout pass; its
 	// Position comes from ComputeArrangement instead.
 	ActPlace ActionKind = "place"
+	// Attribute edits that were unreachable: who owns a task, when it is due,
+	// and how much space something takes. All content fields, so all of them
+	// ride the generic update op.
+	ActSetAssignee ActionKind = "set_assignee"
+	ActSetReminder ActionKind = "set_reminder"
+	ActResize      ActionKind = "resize"
+	// A heading is a CARD with a variant, not a new type — it is a landmark on
+	// the canvas that names a region without boxing it.
+	ActCreateHeading ActionKind = "create_heading"
 )
 
 // Creates reports whether the action brings a new element into being.
 func (k ActionKind) Creates() bool {
 	switch k {
 	case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink,
-		ActConnect, ActCreateTable, ActCloneHere, ActComment:
+		ActConnect, ActCreateTable, ActCloneHere, ActComment, ActCreateHeading:
 		return true
 	}
 	return false
@@ -93,6 +102,8 @@ func (k ActionKind) ElementType() domain.ElementType {
 		return domain.TypeClone
 	case ActComment:
 		return domain.TypeCommentThread
+	case ActCreateHeading:
+		return domain.TypeCard
 	}
 	return domain.TypeUnknown
 }
@@ -127,10 +138,13 @@ type Action struct {
 	Color   string `bson:"color,omitempty"   json:"color,omitempty"`
 	Done    bool   `bson:"done,omitempty"    json:"done,omitempty"`
 	// FromID / ToID carry a connection's endpoints; Rows carries a table.
-	FromID  string     `bson:"fromId,omitempty" json:"fromId,omitempty"`
-	ToID    string     `bson:"toId,omitempty"   json:"toId,omitempty"`
-	Rows    [][]string `bson:"rows,omitempty"   json:"rows,omitempty"`
-	Section string     `bson:"section,omitempty" json:"section,omitempty"`
+	FromID string     `bson:"fromId,omitempty" json:"fromId,omitempty"`
+	ToID   string     `bson:"toId,omitempty"   json:"toId,omitempty"`
+	Rows   [][]string `bson:"rows,omitempty"   json:"rows,omitempty"`
+	// AssigneeID / RemindAt carry the people and time edits.
+	AssigneeID string `bson:"assigneeId,omitempty" json:"assigneeId,omitempty"`
+	RemindAt   string `bson:"remindAt,omitempty"   json:"remindAt,omitempty"`
+	Section    string `bson:"section,omitempty" json:"section,omitempty"`
 	// Position is assigned by the server's layout pass for elements that land
 	// directly on a canvas, so preview and commit cannot disagree.
 	Position *ColumnBox `bson:"position,omitempty" json:"position,omitempty"`
@@ -231,7 +245,7 @@ func CompileOps(p *Plan, scope *BoardScope) ([]domain.Op, error) {
 	for _, a := range p.Actions {
 		switch a.Kind {
 		case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink,
-			ActCreateTable, ActConnect, ActCloneHere, ActComment:
+			ActCreateTable, ActConnect, ActCloneHere, ActComment, ActCreateHeading:
 			ops = append(ops, createOp(a))
 			if a.Kind == ActCreateTodo {
 				// A to-do list is a container; its items are TASK children,
@@ -294,6 +308,53 @@ func CompileOps(p *Plan, scope *BoardScope) ([]domain.Op, error) {
 				Action:      domain.ActionUpdate,
 				Changes:     domain.Content{"labelIds": next},
 				UndoChanges: domain.Content{"labelIds": prev},
+			})
+
+		case ActSetAssignee:
+			el, ok := scope.Elements[a.ElementID]
+			if !ok {
+				return nil, fmt.Errorf("agent: plan assigns %s, which is outside the compiled scope", a.ElementID)
+			}
+			prev, _ := el.Content["assigneeId"].(string)
+			ops = append(ops, domain.Op{
+				ElementID:   a.ElementID,
+				Action:      domain.ActionUpdate,
+				Changes:     domain.Content{"content": map[string]any{"assigneeId": a.AssigneeID}},
+				UndoChanges: domain.Content{"content": map[string]any{"assigneeId": prev}},
+			})
+
+		case ActSetReminder:
+			el, ok := scope.Elements[a.ElementID]
+			if !ok {
+				return nil, fmt.Errorf("agent: plan schedules %s, which is outside the compiled scope", a.ElementID)
+			}
+			prev, _ := el.Content["reminderAt"].(string)
+			ops = append(ops, domain.Op{
+				ElementID:   a.ElementID,
+				Action:      domain.ActionUpdate,
+				Changes:     domain.Content{"content": map[string]any{"reminderAt": a.RemindAt}},
+				UndoChanges: domain.Content{"content": map[string]any{"reminderAt": prev}},
+			})
+
+		case ActResize:
+			el, ok := scope.Elements[a.ElementID]
+			if !ok {
+				return nil, fmt.Errorf("agent: plan resizes %s, which is outside the compiled scope", a.ElementID)
+			}
+			if a.Position == nil {
+				return nil, fmt.Errorf("agent: resize action %d has no size", a.Seq)
+			}
+			// A move op carrying only width: size lives on location, and the
+			// inverse restores the whole prior location so nothing else drifts.
+			ops = append(ops, domain.Op{
+				ElementID: a.ElementID,
+				Action:    domain.ActionMove,
+				Changes: domain.Content{"location": map[string]any{
+					"parentId": el.Location.ParentID,
+					"section":  string(el.Location.Section),
+					"width":    a.Position.Width,
+				}},
+				UndoChanges: domain.Content{"location": locationOf(el)},
 			})
 
 		case ActSetColor:
@@ -440,6 +501,10 @@ func createOp(a Action) domain.Op {
 		// The thread element carries no body; the comment itself lives in the
 		// comment collection, keyed by this element's id.
 		content["resolved"] = false
+	case ActCreateHeading:
+		content["textPreview"] = a.Text
+		content["doc"] = tiptapDoc(a.Text)
+		content["variant"] = "heading"
 	}
 
 	return domain.Op{

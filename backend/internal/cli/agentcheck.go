@@ -115,6 +115,16 @@ var agentCheckCmd = &cobra.Command{
 			return nil // declining, or finding nothing to do, is an outcome
 		}
 
+		// An answer with no changes is a legitimate outcome, and validating it as
+		// if it were a change-set reports a good run as a failure. The service
+		// short-circuits the same way.
+		if len(plan.Actions) == 0 {
+			fmt.Printf("\n──── answer (no changes) ────\n  %s\n", plan.Summary)
+			fmt.Printf("\nelapsed  %s · %d call(s) · %d in / %d out\n",
+				elapsed.Round(time.Millisecond), usage.Calls, usage.InputTokens, usage.OutputTokens)
+			return nil
+		}
+
 		verdict := agent.Preconditions(plan, scope, task)
 
 		fmt.Printf("\n──── plan (%d change(s)) ────\n", len(plan.Actions))

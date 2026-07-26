@@ -110,7 +110,10 @@ function Ask() {
   }, [elements, boardId, selection]);
 
   useEffect(() => {
-    setScope(counts.selection > 0 ? 'selection' : 'board');
+    // Opened from a right-click on a selection, the composer starts there —
+    // otherwise the entry point would silently lose what you pointed at.
+    const pending = useAgent.getState().pendingScope;
+    setScope(pending ?? (counts.selection > 0 ? 'selection' : 'board'));
     const id = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

@@ -189,6 +189,22 @@ func shapeOf(a Action) error {
 		if a.ElementID == "" {
 			return fmt.Errorf("ticking needs a target")
 		}
+	case ActSetAssignee:
+		if a.ElementID == "" || a.AssigneeID == "" {
+			return fmt.Errorf("assigning needs a task and a person")
+		}
+	case ActSetReminder:
+		if a.ElementID == "" || a.RemindAt == "" {
+			return fmt.Errorf("a reminder needs a task and a time")
+		}
+	case ActResize:
+		if a.ElementID == "" || a.Position == nil || a.Position.Width <= 0 {
+			return fmt.Errorf("resizing needs a target and a width")
+		}
+	case ActCreateHeading:
+		if a.Text == "" {
+			return fmt.Errorf("a heading needs text")
+		}
 	case ActPlace:
 		if a.ElementID == "" || a.Position == nil {
 			return fmt.Errorf("placing needs a target and a position")

@@ -83,6 +83,10 @@ type BoardScope struct {
 	Labels []LabelRef
 	// Members is the hash of the eligible id set as it stood at compile time.
 	Members string
+	// People are the board's collaborators, so a task can be assigned to
+	// somebody who actually has access. Without this the agent would either
+	// guess at a subject id or never assign anything.
+	People []PersonRef
 	// Instructions is the board author's standing note about how this board
 	// works. Author-written only: rules the agent inferred for itself would be
 	// invisible, compound silently, and could not be argued with.
@@ -315,6 +319,12 @@ func textFor(el *domain.Element) (string, string) {
 // Render serializes the scope into the digest the model receives. The format is
 // deliberately terse and line-oriented: it survives truncation gracefully and
 // makes the trust label impossible to miss on any line.
+// PersonRef is one collaborator on the board.
+type PersonRef struct {
+	ID   string
+	Name string
+}
+
 // LabelRef is one entry of the owner's label vocabulary.
 type LabelRef struct {
 	ID   string
@@ -338,6 +348,13 @@ func (s *BoardScope) Render(hint string) string {
 	}
 	// The write capability without the matching read is how a parallel taxonomy
 	// gets born: the agent would tag things it could not see were already tagged.
+	if len(s.People) > 0 {
+		who := make([]string, 0, len(s.People))
+		for _, p := range s.People {
+			who = append(who, fmt.Sprintf("%s=%s", p.ID, p.Name))
+		}
+		fmt.Fprintf(&b, "PEOPLE (use these ids with set_assignee): %s\n", strings.Join(who, ", "))
+	}
 	if len(s.Labels) > 0 {
 		names := make([]string, 0, len(s.Labels))
 		for _, l := range s.Labels {

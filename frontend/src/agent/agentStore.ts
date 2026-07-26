@@ -49,7 +49,9 @@ interface AgentState {
   cancel(): Promise<void>;
   revert(): Promise<void>;
   dismiss(): void;
-  setOpen(open: boolean): void;
+  /** Scope the composer should start on, when opened from a selection. */
+  pendingScope: AgentScope | null;
+  setOpen(open: boolean, scope?: AgentScope): void;
 }
 
 /** States where a run is still working and the user is just watching. */
@@ -64,6 +66,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   open: false,
   hoverSeq: null,
   recent: [],
+  pendingScope: null,
 
   async loadCapabilities() {
     try {
@@ -219,8 +222,8 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({ run: null, events: [], adjustments: [], hoverSeq: null });
     void get().loadRecent();
   },
-  setOpen(open) {
-    set({ open });
+  setOpen(open, scope) {
+    set({ open, pendingScope: scope ?? null });
     if (open) void get().loadRecent();
   },
 }));

@@ -45,6 +45,10 @@ const (
 	toolLook         = "look_at"
 	toolClone        = "clone_here"
 	toolComment      = "comment"
+	toolAssign       = "set_assignee"
+	toolRemind       = "set_reminder"
+	toolResize       = "resize"
+	toolHeading      = "create_heading"
 	toolArrange      = "arrange"
 	toolTidy         = "tidy_board"
 	toolMerge        = "merge_notes"
@@ -487,6 +491,9 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		ElementIDs []string   `json:"elementIds"`
 		Texts      []string   `json:"texts"`
 		Layout     string     `json:"layout"`
+		UserID     string     `json:"userId"`
+		When       string     `json:"when"`
+		Size       string     `json:"size"`
 	}
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &in); err != nil {
@@ -644,6 +651,88 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 			tree += fmt.Sprintf("(%d board(s) not expanded — this is as deep as the outline goes)", elided)
 		}
 		return out(tree)
+
+	case toolAssign:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type != domain.TypeTask {
+			return fail("%s is a %s; only tasks carry an owner", el.ID, el.Type)
+		}
+		var person *PersonRef
+		for i := range s.scope.People {
+			if s.scope.People[i].ID == in.UserID {
+				person = &s.scope.People[i]
+			}
+		}
+		if person == nil {
+			// Same treatment as a foreign element id: assigning work to somebody
+			// without access to the board is not a thing to do quietly.
+			s.outOfScope++
+			return fail("%s is not one of this board's people", in.UserID)
+		}
+		s.add(Action{
+			Kind: ActSetAssignee, ElementID: el.ID, AssigneeID: person.ID,
+			Summary: fmt.Sprintf("%s → %s", truncate(sanitizeText(textOf(el)), 34), person.Name),
+		})
+		return out("Staged.")
+
+	case toolRemind:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		when, perr := time.Parse(time.RFC3339, strings.TrimSpace(in.When))
+		if perr != nil {
+			return fail("%q is not an RFC3339 timestamp (e.g. 2026-09-01T09:00:00Z)", in.When)
+		}
+		s.add(Action{
+			Kind: ActSetReminder, ElementID: el.ID, RemindAt: when.UTC().Format(time.RFC3339),
+			Summary: fmt.Sprintf("%s · %s", truncate(sanitizeText(textOf(el)), 34), when.UTC().Format("2 Jan")),
+		})
+		return out("Staged.")
+
+	case toolResize:
+		width, ok := map[string]float64{"small": 220, "medium": 320, "large": 460}[strings.ToLower(in.Size)]
+		if !ok {
+			return fail("size must be small, medium or large")
+		}
+		staged := 0
+		for _, id := range in.ElementIDs {
+			el, err := s.resolveExisting(id)
+			if err != nil {
+				return fail("%v", err)
+			}
+			if el.Location.Width == width {
+				continue
+			}
+			box := ColumnBox{Width: width}
+			s.add(Action{
+				Kind: ActResize, ElementID: el.ID, Position: &box,
+				Summary: fmt.Sprintf("%s → %s", truncate(sanitizeText(textOf(el)), 34), in.Size),
+			})
+			staged++
+		}
+		if staged == 0 {
+			return fail("everything is already that size")
+		}
+		return out(fmt.Sprintf("Staged: %d resized.", staged))
+
+	case toolHeading:
+		text := sanitizeName(in.Text)
+		if text == "" {
+			return fail("a heading needs text")
+		}
+		id, err := s.add(Action{
+			Kind: ActCreateHeading, ParentID: s.scope.Board.ID,
+			Section: string(domain.SectionCanvas),
+			Text:    truncate(text, 60), Summary: truncate(text, 60),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged heading " + id + ".")
 
 	case toolArrange:
 		boxes, err := ComputeArrangement(in.ElementIDs, Layout(in.Layout), s.scope)

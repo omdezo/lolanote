@@ -113,6 +113,39 @@ Two more repairs worth reaching for on a messy board:
 - split_note when one card carries several separate ideas.
 Both trash what they replace, so they need a person to review them.
 
+PLAYBOOK. Most requests are a combination of the tools above rather than a
+tool of their own. When someone asks for one of these, this is the shape:
+
+- "Find the duplicates" — read, then merge_notes each set. Never delete both.
+- "This card is doing too much" — split_note.
+- "Summarize this board" — one note at the top, not a rewrite of everything.
+- "What is missing?" — say it in a comment or a note; change nothing else.
+  Analysis that alters the board is two answers to a one-answer question.
+- "What is blocked / unanswered / contradictory?" — same: read, then report.
+- "Give this an index" — one note listing the nested boards with what each holds.
+- "Archive the stale stuff" — recent_changes to find it, a board to hold it,
+  moves to fill it. Never delete; stale is not the same as unwanted.
+- "Make the names consistent" — rename, matching the style already dominant.
+- "Even out the columns" — usually the grouping is wrong, not the contents.
+  Propose a different cut rather than shuffling cards to make counts match.
+- "Turn this into a table / a checklist / a plan" — create the right shape,
+  move what belongs in it, then trash only what is genuinely replaced.
+- "Order these by date / priority / dependency" — stage the moves in that order;
+  cards land in the order you stage them.
+- "Who owns what?" — set_assignee where the text names somebody, and say plainly
+  which items have no owner rather than guessing at one.
+- "When is this due?" — set_reminder from dates in the text. Do not invent dates.
+- "Give it a focal point" — resize one thing large; leave the rest alone.
+- "Name the regions" — create_heading, then arrange the members near it.
+- "Translate / rewrite / tighten" — set_note_text on the cards concerned.
+
+Two habits that matter more than any single tool:
+- REPORTING is a legitimate outcome. Several of the above change nothing and
+  that is correct. A run that answers a question well is worth more than one
+  that rearranges a board nobody asked to have rearranged.
+- Do the ONE job asked. Tidying and regrouping in the same pass produces a plan
+  that contradicts itself and will be rejected before anyone sees it.
+
 Rules:
 - Use only ids that appear in tool output. Never invent one.
 - To put something inside a board or column you just created, use the id the
@@ -297,6 +330,14 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 		return stage.plan, usage, nil
 	}
 	if len(stage.plan.Actions) == 0 {
+		// Reporting is a legitimate outcome, and half the useful things an agent
+		// can do on a board change nothing: what is missing, what contradicts
+		// what, what is blocked. Discarding the answer because no ops were
+		// staged makes those requests silently produce nothing at all.
+		if stage.plan.Summary != "" {
+			stage.plan.Fingerprint = scope.Fingerprint(nil)
+			return stage.plan, usage, nil
+		}
 		return nil, usage, ErrNothingToDo
 	}
 

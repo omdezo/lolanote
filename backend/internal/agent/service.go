@@ -266,6 +266,7 @@ func (s *Service) execute(ctx context.Context, p *domain.Principal, runID string
 	scope, err := CompileScope(ctx, s.elements, run.Task)
 	if err == nil {
 		s.attachLabels(ctx, scope, run.Task.Owner)
+		s.attachPeople(ctx, scope)
 	}
 	if err != nil {
 		s.fail(ctx, runID, "could not read the board")
@@ -292,6 +293,15 @@ func (s *Service) execute(ctx context.Context, p *domain.Principal, runID string
 		run.Plan = plan
 		s.emit(ctx, run, EvPlanReady, "needs an answer", map[string]any{"question": plan.Question.Text})
 		_ = s.transition(ctx, run, StateProposed, "")
+		return
+	}
+
+	// An answer with no changes: keep the plan so the summary reaches the user,
+	// and end the run rather than offering an Apply button for nothing.
+	if len(plan.Actions) == 0 {
+		run.Plan = plan
+		s.emit(ctx, run, EvPlanReady, "answered without changing anything", nil)
+		s.finishWithReason(ctx, run, StatePartial, plan.Summary)
 		return
 	}
 
@@ -847,6 +857,28 @@ func reasonFor(err error) string {
 		return "the run ran out of time"
 	default:
 		return "the run could not be completed"
+	}
+}
+
+// attachPeople lists who can be assigned work on this board: its owner and its
+// editors. Resolved to names so the model reasons about "Sara" rather than a
+// subject id, and scoped to the ACL so it cannot assign work to a stranger.
+func (s *Service) attachPeople(ctx context.Context, scope *BoardScope) {
+	if s.users == nil || scope == nil || scope.Board == nil || scope.Board.ACL == nil {
+		return
+	}
+	subs := append([]string{scope.Board.ACL.OwnerID}, scope.Board.ACL.Editors...)
+	seen := map[string]bool{}
+	for _, sub := range subs {
+		if sub == "" || seen[sub] {
+			continue
+		}
+		seen[sub] = true
+		name := sub
+		if u, err := s.users.GetBySub(ctx, sub); err == nil && u != nil && u.DisplayName != "" {
+			name = u.DisplayName
+		}
+		scope.People = append(scope.People, PersonRef{ID: sub, Name: sanitizeName(name)})
 	}
 }
 
