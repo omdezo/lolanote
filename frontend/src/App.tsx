@@ -182,6 +182,12 @@ export default function App() {
     if (isAuthenticated()) void useAgent.getState().loadCapabilities();
   }, [booted]);
 
+  // A free, model-less check of whether this board wants tidying. Re-run per
+  // board, never on a timer: a hint that reappears while you work is a nag.
+  useEffect(() => {
+    if (booted && boardId) void useAgent.getState().loadDrift();
+  }, [booted, boardId]);
+
   // Global hosts render regardless of view mode.
   const hosts = (
     <>

@@ -203,6 +203,13 @@ export type AgentRunState =
   | 'COMPLETED' | 'PARTIAL' | 'DISCARDED' | 'CANCELLED' | 'FAILED' | 'DENIED'
   | 'BUDGET_EXHAUSTED' | 'SECURITY_QUARANTINED' | 'REVERTED';
 
+/** A free, model-less observation that a board wants attention. */
+export interface AgentDrift {
+  kind: string;
+  message: string;
+  intent: string;
+}
+
 /** One change the agent actually made on a board. */
 export interface AgentAuditEntry {
   runId: string;

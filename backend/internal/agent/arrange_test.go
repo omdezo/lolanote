@@ -250,3 +250,32 @@ func TestPlan_RejectsPlacingAndFilingTheSameElement(t *testing.T) {
 		t.Errorf("a coherent plan was rejected: %+v", v.Criteria)
 	}
 }
+
+// The ambient hint has to be free and quiet: one observation at most, only when
+// a person would agree with it on sight, and nothing at all on a tidy board.
+func TestDrift_SaysOneTrueThingOrNothing(t *testing.T) {
+	// A board arranged properly must produce no hint at all.
+	tidy := scatter("b1", [2]float64{0, 0}, [2]float64{340, 0}, [2]float64{680, 0})
+	if d := agent.DetectDrift(tidy); d != nil {
+		t.Errorf("a tidy board was nagged: %+v", d)
+	}
+
+	// Piled cards are unreadable, which nobody arranges on purpose.
+	piled := scatter("b1", [2]float64{10, 10}, [2]float64{20, 15}, [2]float64{30, 20}, [2]float64{40, 25})
+	d := agent.DetectDrift(piled)
+	if d == nil || d.Kind != "overlap" {
+		t.Fatalf("overlapping cards produced %+v, want an overlap hint", d)
+	}
+	if d.Intent == "" || d.Message == "" {
+		t.Error("a hint must carry both what it saw and what to ask for")
+	}
+	// The intent must be actionable as written — it is sent verbatim.
+	if !contains(d.Intent, "Tidy") {
+		t.Errorf("the hint's intent does not ask for a tidy: %q", d.Intent)
+	}
+
+	// Empty boards say nothing.
+	if d := agent.DetectDrift(&agent.BoardScope{}); d != nil {
+		t.Errorf("an empty scope produced %+v", d)
+	}
+}

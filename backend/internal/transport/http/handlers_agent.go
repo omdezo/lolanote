@@ -134,6 +134,22 @@ func (h *Handlers) AuditAgentBoard(c echo.Context) error {
 	return c.JSON(http.StatusOK, entries)
 }
 
+// BoardDrift reports whether a board looks like it wants tidying. Costs no
+// tokens, so the client may ask on every board open.
+func (h *Handlers) BoardDrift(c echo.Context) error {
+	if h.Agent == nil {
+		return domain.ErrUnavailable
+	}
+	d, err := h.Agent.Drift(c.Request().Context(), principal(c), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if d == nil {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.JSON(http.StatusOK, d)
+}
+
 // RefineAgentRun sends a proposed plan back for another pass with the person's
 // steer. The run keeps its identity and its cost meter, so what the user sees
 // is the price of the conversation, not of its last turn.

@@ -111,6 +111,7 @@ func registerRoutes(e *echo.Echo, h *Handlers) {
 	ai.GET("/runs/:id/events", h.AgentRunEvents) // ?since=<sequence> — resumable
 	ai.POST("/runs/:id/apply", h.ApplyAgentRun)
 	ai.GET("/boards/:id/audit", h.AuditAgentBoard)
+	ai.GET("/boards/:id/drift", h.BoardDrift)
 	ai.POST("/runs/:id/refine", h.RefineAgentRun)
 	ai.POST("/runs/:id/discard", h.DiscardAgentRun)
 	ai.POST("/runs/:id/cancel", h.CancelAgentRun)

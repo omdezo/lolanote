@@ -17,7 +17,7 @@ import { create } from 'zustand';
 import { api, ApiError } from '../api/client';
 import type {
   AgentAction, AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent,
-  AgentAuditEntry, AgentPlan, AgentRun, AgentRunState, AgentScope,
+  AgentAuditEntry, AgentDrift, AgentPlan, AgentRun, AgentRunState, AgentScope,
 } from '../api/types';
 import { useBoard } from '../store/boardStore';
 import { toast } from '../components/ui/Toaster';
@@ -42,6 +42,10 @@ interface AgentState {
   /** What the agent has actually changed on this board. */
   audit: AgentAuditEntry[];
   loadAudit(): Promise<void>;
+  /** A quiet observation that this board wants attention. Costs no tokens. */
+  drift: AgentDrift | null;
+  loadDrift(): Promise<void>;
+  dismissDrift(): void;
   setHover(seq: number | null): void;
   resync(): Promise<void>;
   adjust(a: AgentAdjustment): void;
@@ -57,6 +61,10 @@ interface AgentState {
   setOpen(open: boolean, scope?: AgentScope): void;
 }
 
+/** Boards the user waved off this session. Persisting it would be worse: a
+ *  board that drifts again later genuinely is worth mentioning again. */
+const dismissedBoards = new Set<string>();
+
 /** States where a run is still working and the user is just watching. */
 export const WORKING: AgentRunState[] = ['CREATED', 'PLANNING', 'RUNNING', 'APPLYING', 'VERIFYING'];
 
@@ -71,6 +79,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   recent: [],
   pendingScope: null,
   audit: [],
+  drift: null,
 
   async loadCapabilities() {
     try {
@@ -231,6 +240,27 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       set({ audit: (await api.agentAudit(boardId)) ?? [] });
     } catch { set({ audit: [] }); }
+  },
+
+  /**
+   * Free by construction: a pure server-side read of the board's shape, no
+   * model call. That is what lets it run on every board open without costing
+   * anything — the model only runs if the person accepts.
+   */
+  async loadDrift() {
+    const boardId = useBoard.getState().boardId;
+    if (!boardId) { set({ drift: null }); return; }
+    if (dismissedBoards.has(boardId)) { set({ drift: null }); return; }
+    try {
+      set({ drift: (await api.agentDrift(boardId)) ?? null });
+    } catch { set({ drift: null }); }
+  },
+
+  /** Dismissed per board for the session — a hint that returns is a nag. */
+  dismissDrift() {
+    const boardId = useBoard.getState().boardId;
+    if (boardId) dismissedBoards.add(boardId);
+    set({ drift: null });
   },
 
   setHover(hoverSeq) { set({ hoverSeq }); },

@@ -628,8 +628,8 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		if err != nil {
 			return fail("%v", err)
 		}
-		if el.Type != domain.TypeImage {
-			return fail("%s is a %s, not an image", el.ID, el.Type)
+		if el.Type != domain.TypeImage && el.Type != domain.TypeFile {
+			return fail("%s is a %s; only images and files can be read", el.ID, el.Type)
 		}
 		if s.imagesSeen >= maxImagesPerRun {
 			return fail("that is enough images for one run (%d); work from what you have seen", maxImagesPerRun)
@@ -646,8 +646,12 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		// The bytes ride on the NEXT user turn rather than in this outcome:
 		// a tool result is text, and an image is not.
 		s.pendingImages = append(s.pendingImages, cognition.ImagePart{MediaType: mediaType, Data: data})
-		return out(fmt.Sprintf("Attached %s — it is included with this turn, so describe what you see and use it.",
-			truncate(sanitizeName(contentStr(el.Content, "filename")), 60)))
+		what := "image"
+		if mediaType == "application/pdf" {
+			what = "document"
+		}
+		return out(fmt.Sprintf("Attached %s as a %s — it rides with this turn, so read it and act on what is in it.",
+			truncate(sanitizeName(contentStr(el.Content, "filename")), 60), what))
 
 	case toolReadURL:
 		if s.links == nil {

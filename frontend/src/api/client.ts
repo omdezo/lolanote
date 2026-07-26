@@ -2,7 +2,7 @@
 // share token (for boards opened via share links) rides along when present.
 import { forceRefreshToken, getToken, isAuthenticated } from '../auth/keycloak';
 import type {
-  AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent, AgentAuditEntry, AgentRun, AgentScope,
+  AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent, AgentAuditEntry, AgentDrift, AgentRun, AgentScope,
   BoardView, Label, LinkMetadata, Op, PresignResult, QComment, QElement,
   QNotification, ShareState, TrashItem, Txn, User, UserSettings,
 } from './types';
@@ -147,6 +147,7 @@ export const api = {
     request<AgentEvent[]>('GET', `/agent/runs/${id}/events?since=${since}`),
   agentApply: (id: string, adjustments: AgentAdjustment[]) =>
     request<AgentRun>('POST', `/agent/runs/${id}/apply`, { adjustments }),
+  agentDrift: (boardId: string) => request<AgentDrift | null>('GET', `/agent/boards/${boardId}/drift`),
   agentAudit: (boardId: string) => request<AgentAuditEntry[]>('GET', `/agent/boards/${boardId}/audit`),
   agentRefine: (id: string, note: string) => request<AgentRun>('POST', `/agent/runs/${id}/refine`, { note }),
   agentDiscard: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/discard`, {}),

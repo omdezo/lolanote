@@ -237,10 +237,13 @@ func geminiContents(msgs []Message) []geminiContent {
 			}
 			parts = append(parts, geminiPart{FunctionResponse: &geminiFunctionResponse{Name: r.Name, Response: payload}})
 		}
-		for _, img := range m.Images {
+		// Documents and images travel identically here: inlineData with the
+		// right mimeType. Gemini extracts a PDF's native text, layout, tables
+		// and charts without any pipeline of ours.
+		for _, media := range m.Images {
 			parts = append(parts, geminiPart{InlineData: &geminiInlineData{
-				MimeType: img.MediaType,
-				Data:     base64.StdEncoding.EncodeToString(img.Data),
+				MimeType: media.MediaType,
+				Data:     base64.StdEncoding.EncodeToString(media.Data),
 			}})
 		}
 		if len(parts) == 0 {

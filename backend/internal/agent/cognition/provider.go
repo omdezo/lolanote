@@ -53,7 +53,13 @@ const (
 	RoleAssistant = "assistant"
 )
 
-// ImagePart is one image attached to a turn.
+// IsDocument reports whether a part is a PDF rather than an image. The two
+// travel the same way to Gemini (inlineData) but not to Anthropic, which has a
+// distinct document block — so the harness carries the distinction rather than
+// making each adapter re-derive it from the media type.
+func (p ImagePart) IsDocument() bool { return p.MediaType == "application/pdf" }
+
+// ImagePart is one image OR document attached to a turn.
 //
 // Images are carried as bytes rather than URLs: the provider must not be handed
 // a link into this deployment's storage, and a signed URL would expire between

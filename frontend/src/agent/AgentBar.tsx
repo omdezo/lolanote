@@ -50,8 +50,33 @@ export function AgentBar() {
   );
 }
 
-/** Resting state: a quiet invitation that is always on screen. */
+/**
+ * Resting state: a quiet invitation that is always on screen.
+ *
+ * When the board has visibly drifted the pill says so instead — one clause,
+ * dismissible, and clicking it sends the request rather than opening an empty
+ * composer. It costs nothing to detect, so it can be honest about being
+ * optional: a hint that nags is one people learn to ignore.
+ */
 function Pill() {
+  const drift = useAgent((s) => s.drift);
+  if (drift) {
+    return (
+      <div className="agent-pill drift">
+        <SparkleIcon size={15} />
+        <button className="drift-take" onClick={() => {
+          useAgent.getState().dismissDrift();
+          void useAgent.getState().start({ intent: drift.intent, scope: 'board', autonomy: 'preview' });
+        }}>
+          {drift.message} — <em>tidy it?</em>
+        </button>
+        <button className="drift-no" title="Not now"
+          onClick={() => useAgent.getState().dismissDrift()}>
+          <CloseIcon size={12} />
+        </button>
+      </div>
+    );
+  }
   return (
     <button className="agent-pill" onClick={() => useAgent.getState().setOpen(true)}>
       <SparkleIcon size={15} />

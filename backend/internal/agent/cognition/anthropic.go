@@ -145,9 +145,17 @@ func anthropicMessages(msgs []Message) []anthropic.MessageParam {
 		for _, r := range m.Outcomes {
 			blocks = append(blocks, anthropic.NewToolResultBlock(r.CallID, r.Content, r.IsError))
 		}
-		for _, img := range m.Images {
-			blocks = append(blocks, anthropic.NewImageBlockBase64(
-				img.MediaType, base64.StdEncoding.EncodeToString(img.Data)))
+		for _, media := range m.Images {
+			b64 := base64.StdEncoding.EncodeToString(media.Data)
+			if media.IsDocument() {
+				// A PDF is a document block, not an image one: Anthropic parses
+				// the pages itself, including text and tables, where an image
+				// block would only ever see a picture.
+				blocks = append(blocks, anthropic.NewDocumentBlock(
+					anthropic.Base64PDFSourceParam{Data: b64}))
+				continue
+			}
+			blocks = append(blocks, anthropic.NewImageBlockBase64(media.MediaType, b64))
 		}
 		if len(blocks) == 0 {
 			continue

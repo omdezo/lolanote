@@ -455,6 +455,25 @@ func keysOf(c domain.Content) []string {
 // P5: images are attached on demand and bounded. The failure that matters is
 // not "cannot see" — it is a board of forty screenshots silently exhausting a
 // run's context and budget in one turn.
+// PDFs are read natively by both providers — text, layout, tables and figures —
+// so a document is accepted rather than refused, and no OCR pipeline exists to
+// go wrong. This pins that a PDF is not turned away for being a PDF.
+func TestVision_AcceptsDocumentsNotJustImages(t *testing.T) {
+	att := memory.NewAttachmentRepo()
+	if err := att.Insert(context.Background(), &domain.Attachment{
+		ID: "a-doc", OwnerID: "alice", ContentType: "application/pdf", Size: 2000,
+		PublicURL: "", Filename: "brief.pdf", Status: domain.AttachmentUploaded,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// PublicURL is empty, so it stops at "not finished uploading" — NOT at a
+	// type refusal, which is the distinction under test.
+	_, _, err := agent.NewHTTPImageFetcher(att).Fetch(context.Background(), "a-doc")
+	if err == nil || !strings.Contains(err.Error(), "not finished uploading") {
+		t.Fatalf("a PDF was refused for its type rather than its state: %v", err)
+	}
+}
+
 func TestVision_RefusesWhatItCannotOrShouldNotShow(t *testing.T) {
 	att := memory.NewAttachmentRepo()
 	ctx := context.Background()
@@ -466,14 +485,18 @@ func TestVision_RefusesWhatItCannotOrShouldNotShow(t *testing.T) {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
-	seed("a-pdf", "application/pdf", 100, "http://example.test/x")
+	seed("a-zip", "application/zip", 100, "http://example.test/x")
 	seed("a-huge", "image/png", 50<<20, "http://example.test/x")
+	seed("a-huge-pdf", "application/pdf", 50<<20, "http://example.test/x")
 	seed("a-pending", "image/png", 100, "")
 
 	f := agent.NewHTTPImageFetcher(att)
 	for _, c := range []struct{ id, want string }{
-		{"a-pdf", "cannot be viewed"},
+		{"a-zip", "cannot be viewed"},
 		{"a-huge", "too large"},
+		// A PDF is readable, but a 50MB one is still a whole run's context:
+		// roughly 258 tokens per page.
+		{"a-huge-pdf", "too large"},
 		{"a-pending", "not finished uploading"},
 		{"a-missing", "could not be found"},
 	} {

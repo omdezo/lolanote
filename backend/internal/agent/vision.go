@@ -27,6 +27,11 @@ import (
 // discover at the provider's error handler.
 const maxImageBytes = 4 << 20 // 4 MiB
 
+// maxDocumentBytes is larger than an image because a PDF is the point of the
+// exercise, but far below the provider ceiling: a page costs roughly 258 tokens,
+// so a hundred-page document is a whole run's context before a word is written.
+const maxDocumentBytes = 12 << 20 // 12 MiB
+
 // maxImagesPerRun keeps a run's spend predictable. Images are the single most
 // expensive thing that can enter a context.
 const maxImagesPerRun = 4
@@ -38,6 +43,10 @@ var visionTypes = map[string]bool{
 	"image/jpeg": true,
 	"image/webp": true,
 	"image/gif":  true,
+	// A PDF is read natively by both providers — text, layout, tables and the
+	// figures inside it — so there is no OCR or parsing pipeline to build here.
+	// Attaching the file IS the implementation.
+	"application/pdf": true,
 }
 
 // ImageFetcher resolves an attachment into bytes the model can be shown.
@@ -77,8 +86,12 @@ func (f *HTTPImageFetcher) Fetch(ctx context.Context, attachmentID string) ([]by
 	if !visionTypes[mediaType] {
 		return nil, "", fmt.Errorf("%s is a %s, which cannot be viewed", att.Filename, att.ContentType)
 	}
-	if att.Size > maxImageBytes {
-		return nil, "", fmt.Errorf("%s is too large to look at", att.Filename)
+	limit := int64(maxImageBytes)
+	if mediaType == "application/pdf" {
+		limit = maxDocumentBytes
+	}
+	if att.Size > limit {
+		return nil, "", fmt.Errorf("%s is too large to read", att.Filename)
 	}
 	if att.PublicURL == "" {
 		return nil, "", fmt.Errorf("%s has not finished uploading", att.Filename)
@@ -98,12 +111,12 @@ func (f *HTTPImageFetcher) Fetch(ctx context.Context, attachmentID string) ([]by
 	}
 	// Bounded even though Size was checked: the record and the object can
 	// disagree, and the limit that matters is on what enters the context.
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 	if err != nil {
-		return nil, "", fmt.Errorf("that image could not be read")
+		return nil, "", fmt.Errorf("that file could not be read")
 	}
-	if len(data) > maxImageBytes {
-		return nil, "", fmt.Errorf("%s is too large to look at", att.Filename)
+	if int64(len(data)) > limit {
+		return nil, "", fmt.Errorf("%s is too large to read", att.Filename)
 	}
 	return data, mediaType, nil
 }

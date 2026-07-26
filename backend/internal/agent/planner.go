@@ -139,6 +139,15 @@ tool of their own. When someone asks for one of these, this is the shape:
 - "Name the regions" — create_heading, then arrange the members near it.
 - "Translate / rewrite / tighten" — set_note_text on the cards concerned.
 
+- "What does this screenshot say / turn this mockup into cards" — look_at reads
+  the image itself, text and layout included. Then create the cards it implies.
+  There is no separate OCR step; attaching the image IS the reading.
+- "Summarize this PDF / pull the actions out of this document" — look_at reads
+  the whole file, its tables and figures included. Extract into cards or a
+  table; do not paste the document back onto the board as one enormous note.
+- "Break this wall of text into cards" — one card per idea, in the order the
+  text presents them, and a heading if the pieces need naming.
+
 Two habits that matter more than any single tool:
 - REPORTING is a legitimate outcome. Several of the above change nothing and
   that is correct. A run that answers a question well is worth more than one

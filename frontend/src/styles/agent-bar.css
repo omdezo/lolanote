@@ -427,3 +427,23 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- ambient hint -------------------------------------------------------
+   The resting pill, when the board has visibly drifted. Same shape and weight
+   as the invitation it replaces, so it reads as the bar noticing something —
+   not as an alert demanding attention. */
+.agent-pill.drift { cursor: default; gap: 8px; }
+.drift-take {
+  flex: 1; min-width: 0;
+  text-align: start; font: inherit; font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.drift-take em { font-style: normal; color: var(--accent); font-weight: 550; }
+.drift-take:hover { color: var(--ink); }
+.drift-no {
+  flex: none; width: 22px; height: 22px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3);
+}
+.drift-no:hover { background: var(--hover); color: var(--ink); }

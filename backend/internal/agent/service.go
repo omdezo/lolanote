@@ -645,6 +645,29 @@ func (s *Service) Audit(ctx context.Context, p *domain.Principal, boardID string
 	return out, nil
 }
 
+// Drift reports whether this board looks like it wants attention, and what to
+// ask for. Free: a pure function over the compiled scope, with no model call —
+// which is the only way an ambient hint can afford to run on every board open.
+func (s *Service) Drift(ctx context.Context, p *domain.Principal, boardID string) (*Drift, error) {
+	if !s.Enabled() {
+		return nil, ErrDisabled
+	}
+	if _, err := s.access.RequireEdit(ctx, boardID, p); err != nil {
+		return nil, err
+	}
+	// A board already being worked on should not also be nagged about.
+	if active, err := s.runs.ActiveByBoard(ctx, boardID); err == nil && active != nil {
+		return nil, nil
+	}
+	scope, err := CompileScope(ctx, s.elements, TaskSpec{
+		Owner: p.Sub, RootBoardID: boardID, Scope: ScopeBoard,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return DetectDrift(scope), nil
+}
+
 // Cancel stops a run. In preview mode nothing has been written, so cancellation
 // is total; after a commit the user wants Revert instead.
 func (s *Service) Cancel(ctx context.Context, p *domain.Principal, runID string) (*Run, error) {
