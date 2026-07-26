@@ -90,6 +90,39 @@ make dev-web    # Vite dev server on :5173 (proxies /api and /ws)
 | Arabic numerals | typing digits inside Arabic text produces ٠١٢٣٤٥٦٧٨٩ automatically; Latin context keeps 0-9 |
 | Settings | avatar menu → **Settings** — account, notifications, appearance, preferences, localization, toolbar, privacy |
 
+## Reaching it from other devices
+
+The browser talks to **one origin**. nginx in the web container proxies `/api`
+and `/ws` to the Go API and `/realms` + `/resources` to Keycloak, and the client
+resolves its auth server from `window.location` — so the app works at whatever
+address you open it from, with no rebuild.
+
+One variable ties the origins together. Set it and the token issuer, CORS and
+`PUBLIC_API_BASE` all follow, which is what stops the classic failure where the
+issuer in the token disagrees with the address the user typed:
+
+```bash
+# .env
+PUBLIC_ORIGIN=http://192.168.1.50:3000        # a LAN address
+# PUBLIC_ORIGIN=https://foo.trycloudflare.com # or a tunnel
+```
+
+Keycloak also refuses any redirect it was not told about, and the shipped realm
+allows only localhost. Allow the new origin once — this patches the running
+client, because `realm-export.json` is read only on first start:
+
+```bash
+./deploy/allow-origin.sh https://foo.trycloudflare.com
+docker compose up -d
+```
+
+For a public URL without a domain, any HTTP tunnel to port 3000 works, e.g.
+`cloudflared tunnel --url http://localhost:3000`.
+
+> A public tunnel puts the whole stack on the internet, including Keycloak with
+> its dev admin password and the default API client secret. Change those before
+> exposing anything you care about, and take the tunnel down when you are done.
+
 ## Settings
 
 The avatar menu (top-right) opens the settings dialog — every change saves

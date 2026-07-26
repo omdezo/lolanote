@@ -6,8 +6,15 @@
 import Keycloak from 'keycloak-js';
 import { toast } from '../components/ui/Toaster';
 
+// Same-origin by default. The served bundle is baked at build time, so a
+// hard-coded host is wrong the moment the app is reached by anything other
+// than the machine that built it — a phone on the LAN, a tunnel, a real
+// domain. nginx proxies /realms and /resources to Keycloak, so the browser
+// talks to exactly one origin and the issuer in the token matches the address
+// the user typed. Set VITE_KEYCLOAK_URL only when Keycloak lives elsewhere.
 const keycloak = new Keycloak({
-  url: (import.meta.env.VITE_KEYCLOAK_URL as string) || 'http://localhost:8081',
+  url: (import.meta.env.VITE_KEYCLOAK_URL as string)
+    || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081'),
   realm: (import.meta.env.VITE_KEYCLOAK_REALM as string) || 'qomranote',
   clientId: (import.meta.env.VITE_KEYCLOAK_CLIENT_ID as string) || 'qomranote-web',
 });

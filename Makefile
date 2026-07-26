@@ -76,6 +76,14 @@ typecheck: ## Frontend type-check
 web-build: ## Production frontend build
 	cd frontend && $(NPM) run build
 
+## ---- remote access ----
+
+allow-origin: ## Let an extra origin log in: make allow-origin ORIGIN=https://x.trycloudflare.com
+	./deploy/allow-origin.sh $(ORIGIN)
+
+tunnel: ## Public HTTPS URL for port 3000 (needs cloudflared on PATH)
+	cloudflared tunnel --url http://localhost:3000 --no-autoupdate
+
 ## ---- gates ----
 
 verify: ## Everything CI runs: format check, vet, tests, type-check, web build

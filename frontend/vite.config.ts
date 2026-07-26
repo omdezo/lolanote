@@ -10,6 +10,12 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
       '/ws': { target: 'ws://localhost:8080', ws: true },
+      // Keycloak on the dev origin too, mirroring what nginx does in the
+      // container. The client resolves its auth server from window.location,
+      // so without these the dev server would look for /realms on :5173 and
+      // find nothing.
+      '/realms': { target: 'http://localhost:8081', changeOrigin: true },
+      '/resources': { target: 'http://localhost:8081', changeOrigin: true },
     },
   },
 });
