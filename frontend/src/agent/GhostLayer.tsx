@@ -95,7 +95,10 @@ export function useProposedIds(): Set<string> {
     if (state !== 'PROPOSED' || !effective) return EMPTY;
     const ids = new Set<string>();
     for (const a of effective.actions) {
-      if (a.kind === 'move_element' || isDestructive(a.kind)) ids.add(a.elementId);
+      // 'place' moves an element to a new coordinate, so the original must dim
+      // too — otherwise the card appears twice, once where it is and once as a
+      // ghost where it is going.
+      if (a.kind === 'move_element' || a.kind === 'place' || isDestructive(a.kind)) ids.add(a.elementId);
     }
     return ids;
   }, [state, effective]);

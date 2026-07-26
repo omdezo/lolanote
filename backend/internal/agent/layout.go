@@ -204,6 +204,12 @@ func firstNonEmpty(vals ...string) string {
 // something, and it puts it straight onto the board rather than inside a
 // container.
 func placesOnCanvas(a *Action, scope *BoardScope) bool {
+	// ActPlace already carries a computed position from ComputeArrangement.
+	// Re-laying it out here would overwrite the arrangement with the default
+	// shelf pack, which is the opposite of what was asked for.
+	if a.Kind == ActPlace {
+		return false
+	}
 	if !a.Kind.Creates() {
 		return false
 	}

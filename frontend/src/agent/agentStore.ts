@@ -314,6 +314,7 @@ export function kindLabel(kind: string): string {
     rename: 'Rename', set_note_text: 'Edit', delete_element: 'Trash',
     apply_label: 'Tag', set_color: 'Colour', set_task_done: 'Tick',
     connect: 'Link', create_table: 'Table', clone_here: 'Mirror',
+    place: 'Move', comment: 'Note',
   } as Record<string, string>)[kind] ?? kind;
 }
 

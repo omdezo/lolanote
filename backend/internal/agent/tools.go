@@ -45,6 +45,10 @@ const (
 	toolLook         = "look_at"
 	toolClone        = "clone_here"
 	toolComment      = "comment"
+	toolArrange      = "arrange"
+	toolTidy         = "tidy_board"
+	toolMerge        = "merge_notes"
+	toolSplit        = "split_note"
 	toolConnect      = "connect"
 	toolCreateTable  = "create_table"
 	toolHistory      = "recent_changes"
@@ -314,8 +318,10 @@ func ToolCatalogue(allowDelete, allowLabels bool) []cognition.ToolDef {
 	)
 	if allowDelete {
 		tools = append(tools, cognition.ToolDef{
-			Name:        toolDelete,
-			Description: "Move an element to the trash. Only when the user clearly asked for removal.",
+			Name: toolDelete,
+			Description: "Move an element to the trash. Only when the user clearly asked for removal. " +
+				"NOT for duplicates: trashing both copies of something loses the content. " +
+				"Use merge_notes, which writes the combined card first and then trashes the originals.",
 			Schema: obj([]string{"elementId"}, map[string]any{
 				"elementId": str("Element to trash."),
 			}),
@@ -457,27 +463,30 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 	}
 
 	var in struct {
-		BoardID   string     `json:"boardId"`
-		Query     string     `json:"query"`
-		ParentID  string     `json:"parentId"`
-		ElementID string     `json:"elementId"`
-		Title     string     `json:"title"`
-		Text      string     `json:"text"`
-		URL       string     `json:"url"`
-		Section   string     `json:"section"`
-		Summary   string     `json:"summary"`
-		Tasks     []string   `json:"tasks"`
-		LabelID   string     `json:"labelId"`
-		Name      string     `json:"name"`
-		Color     string     `json:"color"`
-		Done      bool       `json:"done"`
-		Because   string     `json:"because"`
-		Question  string     `json:"question"`
-		Options   []string   `json:"options"`
-		SourceID  string     `json:"sourceId"`
-		FromID    string     `json:"fromId"`
-		ToID      string     `json:"toId"`
-		Rows      [][]string `json:"rows"`
+		BoardID    string     `json:"boardId"`
+		Query      string     `json:"query"`
+		ParentID   string     `json:"parentId"`
+		ElementID  string     `json:"elementId"`
+		Title      string     `json:"title"`
+		Text       string     `json:"text"`
+		URL        string     `json:"url"`
+		Section    string     `json:"section"`
+		Summary    string     `json:"summary"`
+		Tasks      []string   `json:"tasks"`
+		LabelID    string     `json:"labelId"`
+		Name       string     `json:"name"`
+		Color      string     `json:"color"`
+		Done       bool       `json:"done"`
+		Because    string     `json:"because"`
+		Question   string     `json:"question"`
+		Options    []string   `json:"options"`
+		SourceID   string     `json:"sourceId"`
+		FromID     string     `json:"fromId"`
+		ToID       string     `json:"toId"`
+		Rows       [][]string `json:"rows"`
+		ElementIDs []string   `json:"elementIds"`
+		Texts      []string   `json:"texts"`
+		Layout     string     `json:"layout"`
 	}
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &in); err != nil {
@@ -635,6 +644,120 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 			tree += fmt.Sprintf("(%d board(s) not expanded — this is as deep as the outline goes)", elided)
 		}
 		return out(tree)
+
+	case toolArrange:
+		boxes, err := ComputeArrangement(in.ElementIDs, Layout(in.Layout), s.scope)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if err := s.stagePlacements(in.ElementIDs, boxes); err != nil {
+			return fail("%v", err)
+		}
+		return out(fmt.Sprintf("Staged: %d element(s) arranged as a %s.", len(boxes), in.Layout))
+
+	case toolTidy:
+		loose := s.looseOnCanvas()
+		if len(loose) == 0 {
+			return out("Nothing is loose on the canvas — everything is already inside a column or board.")
+		}
+		boxes, err := ComputeArrangement(loose, LayoutTidy, s.scope)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if err := s.stagePlacements(loose, boxes); err != nil {
+			return fail("%v", err)
+		}
+		return out(fmt.Sprintf("Staged: tidied %d element(s), keeping each roughly where it was.", len(boxes)))
+
+	case toolMerge:
+		if len(in.ElementIDs) < 2 {
+			return fail("merging needs at least two cards")
+		}
+		text := sanitizeBody(in.Text)
+		if text == "" {
+			return fail("the merged card needs text")
+		}
+		// Resolve every id BEFORE staging anything. A merge that creates the
+		// replacement and then fails on the third id would leave the board with
+		// a duplicate of its own content.
+		var parent string
+		els := make([]*domain.Element, 0, len(in.ElementIDs))
+		for _, id := range in.ElementIDs {
+			el, err := s.resolveExisting(id)
+			if err != nil {
+				return fail("%v", err)
+			}
+			if el.Type != domain.TypeCard {
+				return fail("%s is a %s; only cards can be merged", el.ID, el.Type)
+			}
+			if parent == "" {
+				parent = el.Location.ParentID
+			}
+			els = append(els, el)
+		}
+		if !s.canDelete() {
+			return fail("merging trashes the originals, which this run is not allowed to do")
+		}
+		section := string(domain.SectionCanvas)
+		if els[0].Location.Section == domain.SectionUnsorted {
+			section = string(domain.SectionUnsorted)
+		}
+		id, err := s.add(Action{
+			Kind: ActCreateNote, ParentID: parent, Section: section,
+			Text: truncate(text, 4000), Summary: truncate(text, 60),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		for _, el := range els {
+			if _, err := s.add(Action{
+				Kind: ActDelete, ElementID: el.ID,
+				Summary: truncate(sanitizeText(textOf(el)), 60),
+			}); err != nil {
+				return fail("%v", err)
+			}
+		}
+		return out(fmt.Sprintf("Staged: %d cards merged into %s, originals to trash.", len(els), id))
+
+	case toolSplit:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type != domain.TypeCard {
+			return fail("%s is a %s; only cards can be split", el.ID, el.Type)
+		}
+		parts := make([]string, 0, len(in.Texts))
+		for _, t := range in.Texts {
+			if clean := sanitizeBody(t); clean != "" {
+				parts = append(parts, truncate(clean, 4000))
+			}
+		}
+		if len(parts) < 2 {
+			return fail("splitting needs at least two resulting cards")
+		}
+		if !s.canDelete() {
+			return fail("splitting trashes the original, which this run is not allowed to do")
+		}
+		section := string(domain.SectionCanvas)
+		if el.Location.Section == domain.SectionUnsorted {
+			section = string(domain.SectionUnsorted)
+		}
+		for _, part := range parts {
+			if _, err := s.add(Action{
+				Kind: ActCreateNote, ParentID: el.Location.ParentID, Section: section,
+				Text: part, Summary: truncate(part, 60),
+			}); err != nil {
+				return fail("%v", err)
+			}
+		}
+		if _, err := s.add(Action{
+			Kind: ActDelete, ElementID: el.ID,
+			Summary: truncate(sanitizeText(textOf(el)), 60),
+		}); err != nil {
+			return fail("%v", err)
+		}
+		return out(fmt.Sprintf("Staged: split into %d cards, original to trash.", len(parts)))
 
 	case toolComment:
 		if s.commented {
@@ -1160,4 +1283,62 @@ func (s *staging) renderTree(ctx context.Context, boardID string, depth int) (st
 		elided += subElided
 	}
 	return b.String(), elided, nil
+}
+
+// canDelete reports whether this run may trash anything. Merge and split both
+// destroy the originals, so they are only offered where a person will see the
+// plan before it commits — the same rule the delete tool follows.
+func (s *staging) canDelete() bool { return s.task.Autonomy == AutonomyPreview }
+
+// stagePlacements turns computed geometry into one ActPlace per element,
+// skipping anything already exactly where it should be. A no-op move is still a
+// row in the review list and an op in the transaction, and a "tidy" that
+// reports forty changes when it moved three is a plan nobody can check.
+func (s *staging) stagePlacements(ids []string, boxes map[string]ColumnBox) error {
+	staged := 0
+	for _, id := range ids {
+		box, ok := boxes[id]
+		if !ok {
+			continue
+		}
+		if el, ok := s.scope.Elements[id]; ok && el != nil {
+			if el.Location.Position.X == box.X && el.Location.Position.Y == box.Y {
+				continue
+			}
+		}
+		pos := box
+		if _, err := s.add(Action{
+			Kind: ActPlace, ElementID: id, Position: &pos,
+			Summary: truncate(sanitizeText(textOf(s.scope.Elements[id])), 60),
+		}); err != nil {
+			return err
+		}
+		staged++
+	}
+	if staged == 0 {
+		return fmt.Errorf("everything is already positioned that way")
+	}
+	return nil
+}
+
+// looseOnCanvas is everything sitting directly on the board's canvas — the set
+// a tidy applies to. Things inside a column are ordered by that column and have
+// no position of their own.
+func (s *staging) looseOnCanvas() []string {
+	var out []string
+	for _, it := range s.scope.Items {
+		el, ok := s.scope.Elements[it.ID]
+		if !ok || el == nil {
+			continue
+		}
+		if el.Location.ParentID != s.scope.Board.ID {
+			continue
+		}
+		if el.Location.Section == domain.SectionUnsorted || el.Type == domain.TypeLine {
+			continue
+		}
+		out = append(out, el.ID)
+	}
+	sort.Strings(out) // deterministic, then reordered into reading order by the packer
+	return out
 }

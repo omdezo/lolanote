@@ -218,4 +218,33 @@ func seedCheckBoard(ctx context.Context, elements *memory.ElementRepo, boardID s
 			CreatedBy: "checker", CreatedAt: now, UpdatedAt: now,
 		})
 	}
+
+	// Scattered ON THE CANVAS, deliberately overlapping and ragged. The tray is
+	// a list and has no geometry, so without these the composition tools have
+	// nothing to act on and the smoke test cannot reach them at all.
+	scattered := []struct {
+		x, y float64
+		text string
+	}{
+		{40, 30, "Kickoff call — Thursday 10am, everyone"},
+		{52, 44, "Pricing page copy needs a second pass"},
+		{300, 25, "Ship the changelog before the announcement"},
+		{610, 38, "Ask support what the top three complaints are"},
+		{35, 300, "Nobody owns the migration guide yet"},
+		{290, 315, "Two of these cards say the same thing"},
+		{600, 295, "Two of these cards say the same thing"},
+	}
+	for i, c := range scattered {
+		_ = elements.Insert(ctx, &domain.Element{
+			ID:   fmt.Sprintf("5eed000000000000c0%06x", i+1),
+			Type: domain.TypeCard,
+			Location: domain.Location{
+				ParentID: boardID, Section: domain.SectionCanvas,
+				Position: domain.Point{X: c.x, Y: c.y},
+				Width:    280, Height: 120,
+			},
+			Content:   domain.Content{"textPreview": c.text},
+			CreatedBy: "checker", CreatedAt: now, UpdatedAt: now,
+		})
+	}
 }

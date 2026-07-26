@@ -56,6 +56,10 @@ const (
 	// otherwise dies with the run panel: a month later the board cannot say why
 	// it is shaped the way it is.
 	ActComment ActionKind = "comment"
+	// ActPlace moves an existing element to a computed position on the canvas.
+	// NOT a create, so it never goes through the create-time layout pass; its
+	// Position comes from ComputeArrangement instead.
+	ActPlace ActionKind = "place"
 )
 
 // Creates reports whether the action brings a new element into being.
@@ -316,6 +320,28 @@ func CompileOps(p *Plan, scope *BoardScope) ([]domain.Op, error) {
 				Action:      domain.ActionUpdate,
 				Changes:     domain.Content{"content": map[string]any{"done": a.Done}},
 				UndoChanges: domain.Content{"content": map[string]any{"done": prevDone}},
+			})
+
+		case ActPlace:
+			el, ok := scope.Elements[a.ElementID]
+			if !ok {
+				return nil, fmt.Errorf("agent: plan places %s, which is outside the compiled scope", a.ElementID)
+			}
+			if a.Position == nil {
+				return nil, fmt.Errorf("agent: place action %d has no position", a.Seq)
+			}
+			// A move op, not an update: the element keeps its parent and only
+			// its coordinate changes, and locationOf captures the whole prior
+			// location so the inverse restores it exactly.
+			ops = append(ops, domain.Op{
+				ElementID: a.ElementID,
+				Action:    domain.ActionMove,
+				Changes: domain.Content{"location": map[string]any{
+					"parentId": el.Location.ParentID,
+					"section":  string(domain.SectionCanvas),
+					"position": map[string]any{"x": a.Position.X, "y": a.Position.Y},
+				}},
+				UndoChanges: domain.Content{"location": locationOf(el)},
 			})
 
 		case ActRename:

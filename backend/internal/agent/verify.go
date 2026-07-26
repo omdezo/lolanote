@@ -96,6 +96,35 @@ func Preconditions(p *Plan, scope *BoardScope, task TaskSpec) Verdict {
 		v.Pass("action.shape")
 	}
 
+	// Self-contradiction. Placing an element on the canvas and also filing it
+	// into a container are mutually exclusive: whichever op lands second wins,
+	// so the other was a wasted change the user was asked to approve. A model
+	// composing and restructuring in the same pass produces exactly this, and it
+	// reads as a plan that does not know what it wants.
+	placed, reparented := map[string]int{}, map[string]int{}
+	for _, a := range p.Actions {
+		switch a.Kind {
+		case ActPlace:
+			placed[a.ElementID] = a.Seq
+		case ActMove:
+			reparented[a.ElementID] = a.Seq
+		}
+	}
+	contradiction := ""
+	for id, ps := range placed {
+		if ms, ok := reparented[id]; ok {
+			contradiction = fmt.Sprintf(
+				"action %d positions %s on the canvas and action %d files it into a container — pick one",
+				ps, id, ms)
+			break
+		}
+	}
+	if contradiction != "" {
+		v.Fail("plan.coherent", contradiction, true)
+	} else {
+		v.Pass("plan.coherent")
+	}
+
 	// Nesting depth: an agent that can create boards inside boards could
 	// otherwise bury content arbitrarily deep in a single plan.
 	if depth := plannedDepth(p, scope); depth > 3 {
@@ -159,6 +188,10 @@ func shapeOf(a Action) error {
 	case ActSetTask:
 		if a.ElementID == "" {
 			return fmt.Errorf("ticking needs a target")
+		}
+	case ActPlace:
+		if a.ElementID == "" || a.Position == nil {
+			return fmt.Errorf("placing needs a target and a position")
 		}
 	case ActComment:
 		if a.Text == "" {
