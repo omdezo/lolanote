@@ -29,9 +29,11 @@ interface Props {
   navigate: (boardId: string) => Promise<void>;
   viewportRef: React.RefObject<HTMLDivElement | null>;
   inColumn?: boolean;
+  /** A pending agent proposal would move this card. It dims; it does not move. */
+  proposed?: boolean;
 }
 
-export const ElementShell = memo(function ElementShell({ element, navigate, viewportRef, inColumn }: Props) {
+export const ElementShell = memo(function ElementShell({ element, navigate, viewportRef, inColumn, proposed }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { selection, select, commitTransaction, remoteEditing } = useBoard();
   const drag = useView((s) => s.drag);
@@ -311,6 +313,7 @@ export const ElementShell = memo(function ElementShell({ element, navigate, view
     element.type === 'COLUMN' ? 'column' : '',
     element.type === 'BOARD' || element.type === 'ALIAS' ? 'board-shell' : '',
     element.content?.variant === 'heading' ? 'heading-el' : '',
+    proposed ? 'agent-proposed' : '',
   ].filter(Boolean).join(' ');
 
   // Milanote's board side-bar: Color / Icon / Rename appear beside a

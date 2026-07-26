@@ -12,28 +12,38 @@ const keycloak = new Keycloak({
   clientId: (import.meta.env.VITE_KEYCLOAK_CLIENT_ID as string) || 'qomranote-web',
 });
 
-let initialized = false;
+let initFlight: Promise<boolean> | null = null;
 
 // initAuth boots Keycloak. In 'required' mode it redirects to login; in
 // 'optional' mode (used when opening a public share link) it silently checks
 // for an existing session without forcing login, so anonymous visitors can
 // still view account-free links (§6.1 mechanism 4).
-export async function initAuth(mode: 'required' | 'optional' = 'required'): Promise<boolean> {
-  if (initialized) return keycloak.authenticated ?? false;
-  initialized = true;
-  const ok = await keycloak.init({
-    onLoad: mode === 'required' ? 'login-required' : 'check-sso',
-    pkceMethod: 'S256',
-    checkLoginIframe: false,
-  });
-  if (ok) {
-    // Two safety nets keep the token fresh: the adapter's expiry callback
-    // (fires ~when the access token lapses) and a slow heartbeat that
-    // renews anything inside the 90-second window. Both share one flight.
-    keycloak.onTokenExpired = () => { void refresh(90); };
-    setInterval(() => { void refresh(90); }, 60_000);
-  }
-  return ok;
+//
+// Single-flight, for the same reason refresh() below is: a second caller must
+// await the SAME init rather than race past it. A boolean "already started"
+// guard returned `authenticated === false` while the first init was still in
+// flight, so the caller went on to make a tokenless API call and the app hung
+// on the splash screen forever. React's StrictMode double-invokes effects in
+// development, which made that the normal path on the dev server.
+export function initAuth(mode: 'required' | 'optional' = 'required'): Promise<boolean> {
+  if (initFlight) return initFlight;
+  initFlight = keycloak
+    .init({
+      onLoad: mode === 'required' ? 'login-required' : 'check-sso',
+      pkceMethod: 'S256',
+      checkLoginIframe: false,
+    })
+    .then((ok) => {
+      if (ok) {
+        // Two safety nets keep the token fresh: the adapter's expiry callback
+        // (fires ~when the access token lapses) and a slow heartbeat that
+        // renews anything inside the 90-second window. Both share one flight.
+        keycloak.onTokenExpired = () => { void refresh(90); };
+        setInterval(() => { void refresh(90); }, 60_000);
+      }
+      return ok;
+    });
+  return initFlight;
 }
 
 // Single-flight refresh: concurrent callers (interval + API calls + expiry

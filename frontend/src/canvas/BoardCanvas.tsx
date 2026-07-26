@@ -12,11 +12,13 @@ import { useSettings } from '../store/settingsStore';
 import { useView } from '../store/viewStore';
 import { ElementShell } from './ElementShell';
 import { LineLayer } from './LineLayer';
-import { CloseIcon, FitIcon, MinusIcon, NoteIcon, BoardIcon, PlusIcon } from '../components/Icons';
+import { CloseIcon, FitIcon, MinusIcon, NoteIcon, BoardIcon, PlusIcon, SparkleIcon } from '../components/Icons';
 import { presenceColor } from '../components/Topbar';
 import { useContextMenu } from '../components/ui/ContextMenu';
 import { pasteAt } from '../store/clipboard';
 import { useLabels } from '../store/labels';
+import { GhostLayer, useProposedIds } from '../agent/GhostLayer';
+import { useAgent } from '../agent/agentStore';
 
 interface Props { navigate: (boardId: string) => Promise<void> }
 
@@ -263,11 +265,23 @@ export function BoardCanvas({ navigate }: Props) {
       { label: 'New board here', icon: <BoardIcon size={15} />, onClick: () => {
         void commitTransaction([createOp('BOARD', boardId, { position: pt, content: { title: 'New board' } })]);
       } },
+      ...(useAgent.getState().capabilities?.enabled
+        ? [{
+            label: state.selection.size > 0
+              ? `Ask Qomra about these ${state.selection.size}`
+              : 'Ask Qomra…',
+            icon: <SparkleIcon size={15} />,
+            onClick: () => useAgent.getState().setOpen(true),
+            divider: true,
+          }]
+        : []),
       { label: 'Paste', onClick: () => void pasteAt(pt.x, pt.y), divider: true },
       { label: 'Select all', onClick: () => select(Object.values(useBoard.getState().elements).filter((el) => el.location.parentId === boardId && !el.deletedAt && el.type !== 'LINE').map((el) => el.id)) },
     ]);
   }, [boardId, commitTransaction, select, toCanvas]);
 
+  // Cards a pending proposal would move dim in place; nothing has changed yet.
+  const proposedIds = useProposedIds();
   const remoteCursors = Object.values(presence).filter((p) => p.cursor);
   const modeClass = drawMode ? ' draw-mode' : '';
 
@@ -288,8 +302,15 @@ export function BoardCanvas({ navigate }: Props) {
       <div className="canvas-layer" style={{ transform: `translate(${panX}px, ${panY}px) scale(${scale})` }}>
         <LineLayer />
         {canvasElements.map((el) => (
-          <ElementShell key={el.id} element={el} navigate={navigate} viewportRef={viewportRef} />
+          <ElementShell
+            key={el.id}
+            element={el}
+            navigate={navigate}
+            viewportRef={viewportRef}
+            proposed={proposedIds.has(el.id)}
+          />
         ))}
+        <GhostLayer />
         {drawStroke && (
           <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none' }}>
             <polyline

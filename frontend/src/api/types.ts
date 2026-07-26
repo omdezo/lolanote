@@ -192,3 +192,108 @@ export interface QNotification {
   id: string; kind: string; actorId: string; boardId?: string;
   elementId?: string; message: string; read: boolean; createdAt: string;
 }
+
+// ---- AI agent ---------------------------------------------------------------
+// Mirrors backend/internal/agent. The client renders and adjusts a plan but
+// never authors ops: adjustments are typed, and the server recompiles from its
+// own stored plan.
+
+export type AgentRunState =
+  | 'CREATED' | 'PLANNING' | 'RUNNING' | 'PROPOSED' | 'APPLYING' | 'VERIFYING'
+  | 'COMPLETED' | 'PARTIAL' | 'DISCARDED' | 'CANCELLED' | 'FAILED' | 'DENIED'
+  | 'BUDGET_EXHAUSTED' | 'SECURITY_QUARANTINED' | 'REVERTED';
+
+export type AgentActionKind =
+  | 'create_board' | 'create_column' | 'create_note' | 'create_todo'
+  | 'create_link' | 'move_element' | 'rename' | 'set_note_text' | 'delete_element'
+  // Attribute edits: they change how something is filed without moving it.
+  | 'apply_label' | 'set_color' | 'set_task_done';
+
+/** Server-computed geometry, so preview and commit cannot disagree. */
+export interface AgentBox { x: number; y: number; width: number }
+
+export interface AgentAction {
+  seq: number;
+  kind: AgentActionKind;
+  elementId: string;
+  because?: string;
+  labelId?: string;
+  color?: string;
+  done?: boolean;
+  parentId?: string;
+  title?: string;
+  text?: string;
+  url?: string;
+  tasks?: string[];
+  section?: string;
+  position?: AgentBox;
+  summary: string;
+}
+
+export interface AgentPlan {
+  /** Board content repeatedly tried to steer this run; it never auto-applies. */
+  quarantined?: boolean;
+  /** Set when the run stopped to ask rather than guess. No actions accompany it. */
+  question?: { text: string; options?: string[] };
+  actions: AgentAction[];
+  summary?: string;
+  /** What the agent deliberately did not do, and what the harness dropped. */
+  notes?: string[];
+}
+
+export interface AgentVerdict {
+  passed: boolean;
+  criteria: Array<{ name: string; passed: boolean; detail?: string; fatal: boolean }>;
+}
+
+export interface AgentUsage {
+  inputTokens: number; outputTokens: number; cachedTokens: number;
+  costUsd: number; calls: number;
+}
+
+export interface AgentRun {
+  id: string;
+  state: AgentRunState;
+  reason?: string;
+  rev: number;
+  task: {
+    intent: string;
+    rootBoardId: string;
+    scope: AgentScope;
+    selectionIds?: string[];
+    autonomy: AgentAutonomy;
+  };
+  plan?: AgentPlan;
+  verdict?: AgentVerdict;
+  transactionIds?: string[];
+  usage: AgentUsage;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface AgentEvent {
+  id: string;
+  runId: string;
+  sequence: number;
+  type: string;
+  message?: string;
+  data?: Record<string, any>;
+  at: string;
+}
+
+export type AgentScope = 'board' | 'unsorted' | 'selection';
+export type AgentAutonomy = 'preview' | 'auto';
+
+/** The closed set of edits a human may make to a plan. */
+export type AgentAdjustment =
+  | { kind: 'drop'; seq: number }
+  | { kind: 'retitle'; seq: number; value: string }
+  | { kind: 'retext'; seq: number; value: string };
+
+export interface AgentCapabilities {
+  enabled: boolean;
+  can: string[];
+  cannot: string[];
+  limits: { maxActions: number; maxSteps: number };
+}

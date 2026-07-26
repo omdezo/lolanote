@@ -5,11 +5,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { createOp, moveOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
-import { CloseIcon, EmptyTrayIllustration, InboxIcon } from '../Icons';
+import { CloseIcon, EmptyTrayIllustration, InboxIcon, SparkleIcon } from '../Icons';
+import { useAgent } from '../../agent/agentStore';
 
 export function UnsortedTray({ onClose }: { onClose: () => void }) {
   const { boardId, elements, commitTransaction } = useBoard();
   const [capture, setCapture] = useState('');
+  const agentEnabled = useAgent((s) => s.capabilities?.enabled ?? false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -88,6 +90,14 @@ export function UnsortedTray({ onClose }: { onClose: () => void }) {
           onChange={(e) => setCapture(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && quickCapture()}
         />
+        {/* The highest-intent entry point: offered only once there is a real
+            pile to sort, so it reads as help rather than as advertising. */}
+        {agentEnabled && items.length >= 4 && (
+          <button className="tray-organize" onClick={() => useAgent.getState().setOpen(true)}>
+            <SparkleIcon size={14} />
+            Ask Qomra to sort these {items.length}
+          </button>
+        )}
         {items.length === 0 && (
           <div className="panel-empty">
             <EmptyTrayIllustration />

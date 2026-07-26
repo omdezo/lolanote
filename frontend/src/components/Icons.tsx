@@ -22,6 +22,11 @@ function base({ size = 20, ...rest }: P) {
 export const NoteIcon = (p: P) => (
   <svg {...base(p)}><rect x="4.5" y="4" width="15" height="16" rx="2.5" /><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4" /></svg>
 );
+// The agent's mark: a primary four-point spark with two smaller ones, so it
+// reads as "assisted" rather than as a decorative star.
+export const SparkleIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4.2 13.5 9 18 10.5 13.5 12 12 16.8 10.5 12 6 10.5 10.5 9Z" /><path d="M18.2 15.4l.6 1.8 1.8.6-1.8.6-.6 1.8-.6-1.8-1.8-.6 1.8-.6Z" /><path d="M6.1 4.2l.4 1.2 1.2.4-1.2.4-.4 1.2-.4-1.2L4.5 5.8l1.2-.4Z" /></svg>
+);
 export const LinkIcon = (p: P) => (
   <svg {...base(p)}><path d="M10 14.5 14 9.5" /><path d="M8.5 10.5 6.6 12.8a3.4 3.4 0 0 0 5.2 4.4l1.9-2.3" /><path d="M15.5 13.5l1.9-2.3a3.4 3.4 0 0 0-5.2-4.4L10.3 9" /></svg>
 );

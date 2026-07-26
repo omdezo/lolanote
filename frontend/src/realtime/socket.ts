@@ -51,6 +51,11 @@ async function open() {
     if (hadDisconnect) {
       hadDisconnect = false;
       void useBoard.getState().refreshBoard();
+      // An in-flight run may have progressed while the socket was down; the
+      // journal is a resumable cursor precisely so this is recoverable.
+      void import('../agent/agentStore').then(({ useAgent }) => {
+        if (useAgent.getState().run) void useAgent.getState().resync();
+      });
     }
   };
 
@@ -83,6 +88,19 @@ async function open() {
         const { elementId, on, sub } = env.data;
         const peer = Object.values(store.presence).find((p) => p.sub === sub);
         store.setRemoteEditing(elementId, peer?.name ?? 'Someone', on);
+        break;
+      }
+      case 'agent.event': {
+        // The run's journal rides the board channel, so collaborators watching
+        // the same canvas see the agent work too — the same path ordinary
+        // edits already take.
+        const d = env.data as any;
+        void import('../agent/agentStore').then(({ useAgent }) =>
+          useAgent.getState().ingest({
+            id: '', runId: d.runId, sequence: d.sequence, type: d.type,
+            message: d.message, data: d.data, at: d.at, state: d.state,
+          }),
+        );
         break;
       }
       case 'comment.new':

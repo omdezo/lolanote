@@ -2,6 +2,7 @@
 // share token (for boards opened via share links) rides along when present.
 import { forceRefreshToken, getToken, isAuthenticated } from '../auth/keycloak';
 import type {
+  AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent, AgentRun, AgentScope,
   BoardView, Label, LinkMetadata, Op, PresignResult, QComment, QElement,
   QNotification, ShareState, TrashItem, Txn, User, UserSettings,
 } from './types';
@@ -131,6 +132,25 @@ export const api = {
     request<void>('POST', `/elements/${elementId}/labels`, { labelId }),
   detachLabel: (elementId: string, labelId: string) =>
     request<void>('DELETE', `/elements/${elementId}/labels/${labelId}`),
+
+  // ---- AI agent ----
+  // Note what is absent: no call sends ops. The client asks for a run and
+  // sends typed adjustments; the server decides what lands on the board.
+  agentCapabilities: () => request<AgentCapabilities>('GET', '/agent/capabilities'),
+  agentCreateRun: (body: { boardId: string; intent: string; scope: AgentScope; selectionIds?: string[]; autonomy: AgentAutonomy }) =>
+    request<AgentRun>('POST', '/agent/runs', body),
+  agentRun: (id: string) => request<AgentRun>('GET', `/agent/runs/${id}`),
+  agentRuns: (boardId: string, limit = 10) =>
+    request<AgentRun[]>('GET', `/agent/runs?boardId=${boardId}&limit=${limit}`),
+  // Cursor-based catch-up after a reconnect: live events ride the board socket.
+  agentEvents: (id: string, since = 0) =>
+    request<AgentEvent[]>('GET', `/agent/runs/${id}/events?since=${since}`),
+  agentApply: (id: string, adjustments: AgentAdjustment[]) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/apply`, { adjustments }),
+  agentRefine: (id: string, note: string) => request<AgentRun>('POST', `/agent/runs/${id}/refine`, { note }),
+  agentDiscard: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/discard`, {}),
+  agentCancel: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/cancel`, {}),
+  agentRevert: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/revert`, {}),
 
   notifications: () => request<QNotification[]>('GET', '/notifications'),
   markNotificationsRead: (ids: string[]) => request<void>('POST', '/notifications/read', { ids }),

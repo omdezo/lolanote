@@ -13,8 +13,9 @@ import { prompt } from './ui/Prompt';
 import {
   AudioIcon, BoardIcon, ColorIcon, ColumnIcon, CommentIcon, DocumentIcon,
   DrawIcon, HeadingIcon, ImageIcon, LineIcon, LinkIcon, MapIcon, MoreIcon,
-  NoteIcon, SketchIcon, TableIcon, TodoIcon, TrashIcon, UploadIcon, VideoIcon,
+  NoteIcon, SketchIcon, SparkleIcon, TableIcon, TodoIcon, TrashIcon, UploadIcon, VideoIcon,
 } from './Icons';
+import { useAgent } from '../agent/agentStore';
 
 export function Toolbar() {
   const { boardId, commitTransaction } = useBoard();
@@ -25,6 +26,8 @@ export function Toolbar() {
   const hidden = new Set(hiddenTools);
   const fileInput = useRef<HTMLInputElement>(null);
   const anyFileInput = useRef<HTMLInputElement>(null);
+  const agentEnabled = useAgent((s) => s.capabilities?.enabled ?? false);
+  const dockOpen = useAgent((s) => s.open);
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreTop, setMoreTop] = useState(300);
   const flyoutRef = useRef<HTMLDivElement>(null);
@@ -208,6 +211,17 @@ export function Toolbar() {
         <button className={`rail-btn${drawMode ? ' active' : ''}`} onClick={() => setDrawMode(!drawMode)}>
           <DrawIcon />
           <span>{t('tool.draw')}</span>
+        </button>
+      )}
+
+      {agentEnabled && (
+        <button
+          className={`rail-btn agent${dockOpen ? ' active' : ''}`}
+          onClick={() => useAgent.getState().setOpen(!dockOpen)}
+          title="Ask Qomra to do something on this board"
+        >
+          <SparkleIcon />
+          <span>Ask Qomra</span>
         </button>
       )}
 

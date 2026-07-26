@@ -4,6 +4,8 @@ import App from './App';
 import { initSmartDigits } from './lib/direction';
 import './styles/global.css';
 import './styles/settings.css';
+import './styles/agent.css';
+import './styles/agent-bar.css';
 
 // Typing digits inside Arabic text produces Arabic-Indic numerals — one
 // native beforeinput listener covers every plain text field in the app.

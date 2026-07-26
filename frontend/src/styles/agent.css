@@ -1,0 +1,329 @@
+/* AI agent surfaces. Deliberately built from the same tokens as the rest of
+   the app — the agent is a collaborator inside QomraNote, not a bolted-on
+   assistant with its own visual language. */
+
+/* ---- ghost preview on the canvas ------------------------------------- */
+
+.ghost-layer { position: absolute; inset: 0; pointer-events: none; }
+.ghost-layer > * { pointer-events: auto; }
+
+.ghost-col {
+  position: absolute;
+  border-radius: var(--r-card);
+  /* Dashed and translucent: unmistakably a proposal, not board content. */
+  border: 1.5px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  padding: 8px;
+  box-shadow: 0 8px 26px rgba(var(--accent-rgb), 0.14);
+  transition: background 0.16s var(--ease), border-color 0.16s var(--ease), transform 0.16s var(--ease);
+}
+.ghost-col.receptive { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.ghost-col.drop {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  transform: scale(1.015);
+}
+
+.ghost-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 6px; }
+
+.ghost-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+  padding: 2px 4px;
+  border-radius: 6px;
+  text-align: start;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ghost-title:hover { background: var(--hover); }
+
+.ghost-title-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 6px;
+  padding: 2px 5px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ghost-title-input:focus { outline: none; }
+
+.ghost-count {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.ghost-dissolve {
+  width: 20px; height: 20px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3);
+  flex: none;
+}
+.ghost-dissolve:hover { background: var(--danger-tint); color: var(--danger); }
+
+.ghost-why {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 1.45;
+  padding: 0 4px 7px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ghost-why em { font-style: normal; color: var(--comment-title); }
+
+.ghost-body { display: flex; flex-direction: column; gap: 4px; }
+
+.ghost-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border-radius: 7px;
+  padding: 6px 7px 6px 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+}
+.ghost-chip:active { cursor: grabbing; }
+.ghost-chip-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ghost-chip-x {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3);
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+  flex: none;
+}
+.ghost-chip:hover .ghost-chip-x { opacity: 1; }
+.ghost-chip-x:hover { background: var(--hover-strong); color: var(--ink); }
+
+/* Cards the proposal would move dim in place instead of jumping, so the board
+   still reads as the user's own until they accept. */
+.el.agent-proposed { opacity: 0.38; transition: opacity 0.24s var(--ease); }
+
+/* ---- entry points ---------------------------------------------------- */
+
+/* The tray nudge: appears only when there is genuinely a mess to sort, so it
+   reads as an offer rather than an advertisement. */
+.tray-organize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 9px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--accent);
+  background: var(--accent-tint);
+  transition: background 0.15s var(--ease);
+}
+.tray-organize:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+.rail-btn.agent svg { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ap-orb.spinning, .ap-steps li.active .ap-dot, .ap-busy { animation: none; }
+}
+
+/* Boot failure: a spinner that never resolves tells the user nothing and
+   leaves them no way forward. */
+.boot-error {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--danger);
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.5;
+}
+.boot-retry {
+  margin-top: 14px;
+  padding: 8px 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 550;
+  background: var(--accent);
+  color: #fff;
+}
+.boot-retry:hover { background: var(--accent-deep); }
+
+/* ---- ask box --------------------------------------------------------- */
+
+.ac-intent {
+  width: 100%;
+  border: none;
+  resize: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
+  border-radius: 9px;
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.ac-intent:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.ac-intent::placeholder { color: var(--ink-3); }
+
+.ac-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.ac-preset {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: var(--hover);
+  border-radius: var(--r-pill);
+  padding: 5px 10px;
+  text-align: start;
+}
+.ac-preset:hover { background: var(--hover-strong); color: var(--ink); }
+
+/* ---- plan review list ------------------------------------------------ */
+
+.ap-intent {
+  margin-top: 9px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-style: italic;
+  line-height: 1.45;
+}
+.ap-working { margin-top: 11px; font-size: 12.5px; color: var(--ink); }
+
+.ap-plan {
+  list-style: none;
+  margin: 11px 0 0;
+  padding: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.ap-row:hover { background: var(--hover); }
+.ap-row.dropped { opacity: 0.4; }
+.ap-row.dropped .ap-row-text { text-decoration: line-through; }
+.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+
+.ap-kind {
+  flex: none;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.ap-kind.k-move_element, .ap-kind.k-rename, .ap-kind.k-set_note_text {
+  color: var(--ink-3);
+  background: var(--hover-strong);
+}
+
+.ap-row-text {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-row-text:hover:not(:disabled) { color: var(--ink); text-decoration: underline dotted; }
+
+.ap-row-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+}
+.ap-row-input:focus { outline: none; }
+
+.ap-row-x {
+  flex: none;
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3);
+  font-size: 11px;
+  opacity: 0;
+}
+.ap-row:hover .ap-row-x, .ap-row.dropped .ap-row-x { opacity: 1; }
+.ap-row-x:hover { background: var(--hover-strong); color: var(--ink); }
+
+.adb-text em.danger { color: var(--danger); }
+
+/* ---- ghost elements on the canvas ------------------------------------ */
+
+.ghost-el {
+  position: absolute;
+  border-radius: var(--r-card);
+  /* Dashed and translucent: unmistakably a proposal, not board content. */
+  border: 1.5px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  padding: 8px 9px;
+  box-shadow: 0 8px 26px rgba(var(--accent-rgb), 0.14);
+}
+.ghost-el.k-create_board { border-style: solid; border-width: 1.5px; }
+
+.ghost-el-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.ghost-kind {
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.ghost-el .ghost-count {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  margin-inline-start: auto;
+}
+.ghost-el-body {
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ghost-task { font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }

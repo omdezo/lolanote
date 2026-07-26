@@ -23,11 +23,14 @@ import { SettingsDialog } from './components/panels/SettingsDialog';
 import { copySelection, cutSelection, pasteFromClipboardData } from './store/clipboard';
 import { useLabels } from './store/labels';
 import { useSettings } from './store/settingsStore';
+import { AgentBar, useAgentShell } from './agent/AgentBar';
+import { useAgent } from './agent/agentStore';
 
 export type PanelKind = 'none' | 'unsorted' | 'trash' | 'search' | 'share' | 'boards' | 'templates' | 'settings';
 
 export default function App() {
   const [booted, setBooted] = useState(false);
+  const [bootError, setBootError] = useState('');
   const [panel, setPanel] = useState<PanelKind>('none');
   const [publicView, setPublicView] = useState(false);
   const [needPassword, setNeedPassword] = useState<{ token: string; board: string } | null>(null);
@@ -92,7 +95,13 @@ export default function App() {
       await openBoard(me.homeBoardId);
       await connectBoard(me.homeBoardId);
       setBooted(true);
-    })().catch((err) => console.error('boot failed', err));
+    })().catch((err) => {
+      // A failed boot used to leave the splash spinning forever with the cause
+      // only in the console. Surface it, so the state is legible and there is
+      // a way out.
+      console.error('boot failed', err);
+      if (!cancelled) setBootError(err?.message || 'Something went wrong while starting up.');
+    });
     return () => { cancelled = true; disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -163,6 +172,16 @@ export default function App() {
     return () => window.removeEventListener('paste', onPaste);
   }, []);
 
+  // Agent keyboard map and canvas auto-framing live together.
+  useAgentShell();
+
+  // Ask the server what the agent can do here. A deployment without a model
+  // provider reports enabled:false and every entry point stays hidden, so
+  // there are no dead buttons rather than buttons that fail.
+  useEffect(() => {
+    if (isAuthenticated()) void useAgent.getState().loadCapabilities();
+  }, [booted]);
+
   // Global hosts render regardless of view mode.
   const hosts = (
     <>
@@ -188,8 +207,17 @@ export default function App() {
       <div className="boot-screen">
         <div className="boot-mark">Q</div>
         <div className="boot-title">Qomra<em>Note</em></div>
-        <div className="spinner" />
-        <div className="boot-sub">Get organized. Stay creative.</div>
+        {bootError ? (
+          <>
+            <div className="boot-error">{bootError}</div>
+            <button className="boot-retry" onClick={() => window.location.reload()}>Try again</button>
+          </>
+        ) : (
+          <>
+            <div className="spinner" />
+            <div className="boot-sub">Get organized. Stay creative.</div>
+          </>
+        )}
       </div>
     );
   }
@@ -236,6 +264,10 @@ export default function App() {
           {panel === 'settings' && <SettingsDialog onClose={() => setPanel('none')} />}
         </div>
       </div>
+      {/* Agent surfaces sit outside the workspace so the composer, the run
+          panel, and the decision bar float above the canvas without competing
+          with the side panels for layout. */}
+      {!readOnly && <AgentBar />}
       {hosts}
     </ErrorBoundary>
   );

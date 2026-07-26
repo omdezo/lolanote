@@ -1,0 +1,420 @@
+/* The agent bar: one home, bottom centre of the canvas, always in view.
+
+   Built from the same tokens as the rest of the app — the agent is a
+   collaborator inside QomraNote, not a bolted-on assistant with its own visual
+   language. Everything grows upward from the bar so the anchor never moves.
+
+   The card is one surface. Earlier this nested an input box inside the glass
+   and hung two segmented tracks below it, which read as three stacked panels
+   for what is really one question. Now the glass *is* the field: the caret sits
+   directly on it, and the only chrome below is two quiet chips. */
+
+.agent-bar {
+  position: fixed;
+  /* Centred on the CANVAS, not the window, so the tool rail does not push it
+     visually off-centre. Logical properties keep it correct in RTL. */
+  inset-inline: var(--rail-w) 0;
+  bottom: 22px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 58;
+  pointer-events: none;
+}
+.agent-bar > * { pointer-events: auto; }
+
+.agent-shell { width: min(560px, 92%); }
+
+/* One glass recipe, shared, so the pill and the card are visibly the same
+   object at two sizes rather than two components that happen to sit together. */
+.agent-pill,
+.agent-card {
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-2);
+}
+
+/* ---- resting pill ---------------------------------------------------- */
+
+.agent-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--r-pill);
+  color: var(--ink-3);
+  font-size: 13px;
+  text-align: start;
+  transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease), color 0.2s var(--ease);
+}
+.agent-pill svg { color: var(--accent); flex: none; }
+.agent-pill span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-pill:hover {
+  color: var(--ink-2);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-pop);
+}
+.agent-pill kbd {
+  font: inherit; font-size: 10.5px;
+  color: var(--ink-3);
+  background: var(--hover-strong);
+  border-radius: 6px; padding: 2px 6px;
+  flex: none;
+}
+
+/* ---- expanded card --------------------------------------------------- */
+
+.agent-card {
+  width: 100%;
+  border-radius: 18px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.2s var(--ease);
+}
+/* The field has no border of its own, so focus is expressed by the whole
+   card — one object lighting up rather than a ring inside a ring. */
+.agent-card:focus-within {
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), var(--shadow-pop),
+              0 0 0 4px rgba(var(--accent-rgb), 0.1);
+}
+
+/* Sections inside the card are separated by air and one hairline, never by
+   another container. */
+.ac-presets {
+  display: flex;
+  gap: 5px;
+  padding: 6px 6px 8px;
+  overflow: hidden;
+}
+.ac-preset {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: var(--hover);
+  border-radius: var(--r-pill);
+  padding: 5px 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+.ac-preset:hover { background: var(--hover-strong); color: var(--ink); }
+
+.ac-recent { display: flex; flex-direction: column; gap: 1px; padding: 0 8px 6px; }
+.ac-recent-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--ink-3);
+  padding: 3px 0;
+}
+.ac-recent-row span {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-recent-row button { color: var(--accent); padding: 2px 7px; border-radius: 6px; }
+.ac-recent-row button:hover { background: var(--accent-tint); }
+
+/* ---- the field ------------------------------------------------------- */
+
+.ac-inputrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+}
+.ac-inputrow > svg { color: var(--accent); flex: none; margin-bottom: 6px; }
+
+.ac-intent {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-height: 140px;
+  padding: 3px 0;
+}
+.ac-intent::placeholder { color: var(--ink-3); }
+
+.ac-send {
+  flex: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.16s var(--ease), transform 0.16s var(--ease), opacity 0.16s var(--ease);
+}
+.ac-send:hover:not(:disabled) { background: var(--accent-deep); transform: scale(1.06); }
+.ac-send:disabled { opacity: 0.25; cursor: default; }
+
+/* ---- chips ----------------------------------------------------------- */
+
+.ac-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px 4px;
+  margin: 0 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Both settings are chips that show their current value, so the row states
+   what will happen instead of offering a menu of what could. */
+.ac-chip {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: transparent;
+  border-radius: var(--r-pill);
+  padding: 4px 10px;
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+.ac-chip:hover { background: var(--hover); color: var(--ink-2); }
+.ac-chip svg { flex: none; }
+.ac-chip b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* Auto-apply is the only setting that changes what a click commits to, so it
+   is the only one that earns colour. */
+.ac-chip.mode.auto { color: var(--accent); background: var(--accent-tint); }
+.ac-chip.mode.auto:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+.ac-spacer { flex: 1; }
+.ac-hint { font-size: 11px; color: var(--ink-3); opacity: 0.75; padding-inline-end: 4px; }
+.ac-hint kbd { font: inherit; font-size: 10px; opacity: 0.9; }
+
+/* ---- working --------------------------------------------------------- */
+
+/* Staged changes tick past as they are decided, so the wait is spent watching
+   the plan form rather than watching a spinner. */
+.ac-ticker {
+  list-style: none; margin: 0;
+  padding: 8px 12px 4px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ac-ticker li {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--ink-3);
+  animation: tick-in 0.24s var(--ease) both;
+}
+.ac-ticker li span:last-child {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-ticker li.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+@keyframes tick-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+.ac-statusrow { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; }
+.ac-status { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-pulse {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex: none;
+  animation: ap-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ap-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.6; }
+}
+.ac-badge {
+  flex: none;
+  font-size: 11px; color: var(--ink-3);
+  padding: 2px 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- decide ---------------------------------------------------------- */
+
+.ac-summary { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; padding: 10px 12px 4px; }
+
+.ac-warn {
+  font-size: 11.5px; line-height: 1.5;
+  color: var(--danger); background: var(--danger-tint);
+  border-radius: 10px; padding: 8px 11px;
+  margin: 4px 6px;
+}
+
+.ac-decide { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; }
+.ac-decide > svg { color: var(--accent); flex: none; }
+.ac-decide-text { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-3); }
+.ac-decide-text strong { color: var(--ink); font-weight: 600; }
+.ac-decide-text em { font-style: normal; color: var(--accent); }
+
+.ac-outcome-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ink-3); }
+.ac-outcome-dot.ok { background: var(--ok); }
+.ac-outcome-dot.bad { background: var(--danger); }
+.ac-outcome-dot.warn { background: var(--comment-title); }
+
+/* Secondary actions carry no fill until hovered: one filled button per card
+   means the primary action is never in a shortlist of three. */
+.ac-ghostbtn {
+  flex: none;
+  display: flex; align-items: center; gap: 5px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--ink-3); background: transparent;
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+.ac-ghostbtn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.ac-ghostbtn:disabled { opacity: 0.4; cursor: default; }
+
+.ac-apply {
+  flex: none;
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 15px;
+  border-radius: 9px;
+  font-size: 12.5px; font-weight: 600;
+  background: var(--accent); color: #fff;
+  transition: background 0.16s var(--ease), transform 0.16s var(--ease);
+}
+.ac-apply:hover:not(:disabled) { background: var(--accent-deep); transform: translateY(-1px); }
+.ac-apply:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+.ac-apply kbd {
+  font: inherit; font-size: 10px; opacity: 0.65;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px; padding: 1px 4px;
+}
+
+.ac-checks { margin: 0; padding: 8px 12px 0 30px; font-size: 11.5px; color: var(--ink-3); line-height: 1.6; }
+
+/* ---- plan list (on demand) ------------------------------------------- */
+
+.ac-plan {
+  list-style: none;
+  margin: 4px 4px 0;
+  padding: 0 0 8px;
+  max-height: 42vh;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ap-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 6px 6px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  transition: background 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+.ap-row:hover { background: var(--hover); }
+/* Row and ghost share one highlight, so they read as the same object. */
+.ap-row.hot { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
+.ap-row.dropped { opacity: 0.42; }
+.ap-row.dropped .ap-row-text { text-decoration: line-through; }
+.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+
+.ap-kind {
+  flex: none;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.02em;
+  color: var(--accent); background: var(--accent-tint);
+  border-radius: 5px; padding: 2px 6px;
+}
+/* Attribute edits are quieter than creates: they change how something is filed,
+   not what exists. */
+.ap-kind.k-move_element, .ap-kind.k-rename, .ap-kind.k-set_note_text,
+.ap-kind.k-apply_label, .ap-kind.k-set_color, .ap-kind.k-set_task_done {
+  color: var(--ink-3); background: var(--hover-strong);
+}
+
+.ap-row-text {
+  flex: 1; min-width: 0;
+  text-align: start; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ap-row-text:hover:not(:disabled) { color: var(--ink); text-decoration: underline dotted; }
+
+.ap-row-input {
+  flex: 1; min-width: 0;
+  border: none; outline: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: 6px; padding: 3px 6px;
+  font: inherit; font-size: 12.5px; color: var(--ink);
+}
+
+.ap-row-x {
+  flex: none;
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3); font-size: 11px;
+  opacity: 0;
+}
+.ap-row:hover .ap-row-x, .ap-row.dropped .ap-row-x { opacity: 1; }
+.ap-row-x:hover { background: var(--hover-strong); color: var(--ink); }
+
+/* A hovered ghost lifts to match its row. */
+.ghost-el { transition: background 0.14s var(--ease), transform 0.14s var(--ease), box-shadow 0.14s var(--ease); }
+.ghost-el.hot {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  box-shadow: 0 10px 30px rgba(var(--accent-rgb), 0.28);
+  transform: scale(1.02);
+}
+
+/* The canvas hint shares this corner — lift it clear of the bar. */
+.hint-pill { bottom: 78px; }
+
+@media (max-width: 720px) {
+  .agent-bar { inset-inline: 8px; bottom: 12px; }
+  .agent-shell { width: 100%; }
+  .ac-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-pulse { animation: none; }
+  .ac-ticker li { animation: none; }
+  .ac-send:hover, .ac-apply:hover, .agent-pill:hover { transform: none; }
+}
+
+/* ---- revise ------------------------------------------------------------
+   Sits above the decision row, so the plan stays visible while you say what
+   should be different about it. */
+.ac-revise {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 14px;
+  margin: 0 4px;
+  border-top: 1px solid var(--hairline);
+}
+.ac-revise-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.ac-revise-input::placeholder { color: var(--ink-3); }
+
+/* ---- clarifying question ----------------------------------------------
+   A run that stopped to ask rather than guess. Answering is a click. */
+.ac-question {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 12px 6px 14px;
+  font-size: 14px; line-height: 1.5; color: var(--ink);
+}
+.ac-question svg { color: var(--accent); flex: none; margin-top: 3px; }
+.ac-answers {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 4px 6px 6px 14px;
+}
+.ac-answer {
+  font-size: 12.5px; font-weight: 550;
+  color: var(--accent); background: var(--accent-tint);
+  border-radius: 9px; padding: 7px 13px;
+  transition: background 0.14s var(--ease);
+}
+.ac-answer:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.ac-answer:disabled { opacity: 0.5; cursor: default; }
