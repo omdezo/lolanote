@@ -290,7 +290,20 @@ export function useEffectivePlan(): EffectivePlan | null {
   return useMemo(() => computeEffective(plan, adjustments), [plan, adjustments]);
 }
 
-export function isCreate(kind: string): boolean { return kind.startsWith('create_'); }
+/**
+ * Whether an action brings a new element into being, and therefore whether
+ * dropping it must cascade to everything parented to it.
+ *
+ * Must mirror ActionKind.Creates() on the server exactly. A prefix test on
+ * "create_" looks equivalent and is not: `connect` and `clone_here` also make
+ * elements, and treating them as edits would leave orphans behind a dropped
+ * parent.
+ */
+const CREATE_KINDS = new Set([
+  'create_board', 'create_column', 'create_note', 'create_todo',
+  'create_link', 'create_table', 'connect', 'clone_here',
+]);
+export function isCreate(kind: string): boolean { return CREATE_KINDS.has(kind); }
 export function isDestructive(kind: string): boolean { return kind === 'delete_element'; }
 
 /** Short label for an action kind, for the review list. */
@@ -300,6 +313,7 @@ export function kindLabel(kind: string): string {
     create_todo: 'To-do', create_link: 'Link', move_element: 'Move',
     rename: 'Rename', set_note_text: 'Edit', delete_element: 'Trash',
     apply_label: 'Tag', set_color: 'Colour', set_task_done: 'Tick',
+    connect: 'Link', create_table: 'Table', clone_here: 'Mirror',
   } as Record<string, string>)[kind] ?? kind;
 }
 

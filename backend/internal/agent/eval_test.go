@@ -252,3 +252,134 @@ func TestEval_ScoresGoodAndBadPlans(t *testing.T) {
 		}
 	})
 }
+
+// P1: without coordinates, "put this next to that" and "tidy the left cluster"
+// are unanswerable, and the agent cannot see the arrangement it is disturbing.
+func TestDigest_CarriesCoarseGeometry(t *testing.T) {
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: "b1", Type: domain.TypeBoard, Content: domain.Content{"title": "Plan"}},
+		Elements: map[string]*domain.Element{},
+	}
+	at := func(id string, x, y float64) *domain.Element {
+		return &domain.Element{
+			ID: id, Type: domain.TypeCard,
+			Location: domain.Location{ParentID: "b1", Section: domain.SectionCanvas,
+				Position: domain.Point{X: x, Y: y}},
+			Content: domain.Content{"textPreview": "note " + id},
+		}
+	}
+	// Two neighbours in one bucket, one far away, one in the tray.
+	for _, el := range []*domain.Element{at("c1", 10, 10), at("c2", 90, 40), at("c3", 1400, 700)} {
+		scope.Elements[el.ID] = el
+		scope.Items = append(scope.Items, agent.ItemFor(el))
+	}
+	tray := &domain.Element{
+		ID: "c4", Type: domain.TypeCard,
+		Location: domain.Location{ParentID: "b1", Section: domain.SectionUnsorted},
+		Content:  domain.Content{"textPreview": "loose"},
+	}
+	scope.Elements[tray.ID] = tray
+	scope.Items = append(scope.Items, agent.ItemFor(tray))
+
+	out := scope.Render("")
+	if !strings.Contains(out, "@A1") {
+		t.Errorf("no cell reference for an element at the origin:\n%s", out)
+	}
+	if !strings.Contains(out, "LAYOUT:") || !strings.Contains(out, "2 around A1") {
+		t.Errorf("neighbourhoods not summarized:\n%s", out)
+	}
+	// The tray is a list, not a canvas; giving it coordinates would be a lie.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "c4 ") && strings.Contains(line, "@") {
+			t.Errorf("an unsorted item was given geometry: %s", line)
+		}
+	}
+}
+
+// I3: board conventions are author-written and arrive as trust-labelled data,
+// never as instructions the agent inferred for itself.
+func TestDigest_CarriesBoardInstructionsAsData(t *testing.T) {
+	scope := &agent.BoardScope{
+		Board:        &domain.Element{ID: "b1", Type: domain.TypeBoard, Content: domain.Content{"title": "Pipeline"}},
+		Elements:     map[string]*domain.Element{},
+		Instructions: "Columns are pipeline stages; never add one.",
+	}
+	out := scope.Render("")
+	if !strings.Contains(out, "HOW THIS BOARD WORKS ⟨user⟩") {
+		t.Errorf("board instructions missing or unlabelled:\n%s", out)
+	}
+	if !strings.Contains(out, "never add one") {
+		t.Errorf("instruction text not rendered:\n%s", out)
+	}
+}
+
+// R5: a ragged table is rejected by shape validation rather than reaching the
+// canvas as a broken grid.
+func TestTable_RaggedRowsAreRejected(t *testing.T) {
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: "b1", Type: domain.TypeBoard},
+		Elements: map[string]*domain.Element{},
+	}
+	good := &agent.Plan{Actions: []agent.Action{{
+		Seq: 0, Kind: agent.ActCreateTable, ElementID: "t1", ParentID: "b1",
+		Rows: [][]string{{"Tier", "Price"}, {"Team", "$10"}},
+	}}}
+	if v := agent.Preconditions(good, scope, agent.TaskSpec{Budget: agent.DefaultBudget()}); !v.Passed {
+		t.Fatalf("a well-formed table was rejected: %+v", v.Criteria)
+	}
+	ragged := &agent.Plan{Actions: []agent.Action{{
+		Seq: 0, Kind: agent.ActCreateTable, ElementID: "t1", ParentID: "b1",
+		Rows: [][]string{{"Tier", "Price"}, {"Team"}},
+	}}}
+	if v := agent.Preconditions(ragged, scope, agent.TaskSpec{Budget: agent.DefaultBudget()}); v.Passed {
+		t.Fatal("a ragged table passed validation")
+	}
+}
+
+// R4: a connection to itself is meaningless, and both ends must be real.
+func TestConnect_RequiresTwoDistinctEnds(t *testing.T) {
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: "b1", Type: domain.TypeBoard},
+		Elements: map[string]*domain.Element{},
+	}
+	self := &agent.Plan{Actions: []agent.Action{{
+		Seq: 0, Kind: agent.ActConnect, ElementID: "l1", ParentID: "b1",
+		FromID: "c1", ToID: "c1",
+	}}}
+	if v := agent.Preconditions(self, scope, agent.TaskSpec{Budget: agent.DefaultBudget()}); v.Passed {
+		t.Fatal("an element was allowed to be connected to itself")
+	}
+}
+
+// P2: this is the render that silently did not ship once already — the Item
+// fields existed and CompileScope populated them, but Render never emitted
+// them, so the agent was blind to tags it could set. Pin it.
+func TestDigest_CarriesLabelsAndColours(t *testing.T) {
+	el := &domain.Element{
+		ID: "c1", Type: domain.TypeCard,
+		Location: domain.Location{ParentID: "b1", Section: domain.SectionCanvas},
+		Content:  domain.Content{"textPreview": "waiting on legal", "color": "#fff9db"},
+		LabelIDs: []string{"lbl1", "lbl2"},
+	}
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: "b1", Type: domain.TypeBoard},
+		Elements: map[string]*domain.Element{"c1": el},
+		Items:    []agent.Item{agent.ItemFor(el)},
+		Labels:   []agent.LabelRef{{ID: "lbl1", Name: "Blocked"}},
+	}
+	out := scope.Render("")
+
+	// The vocabulary, so the agent reuses a tag instead of coining a duplicate.
+	if !strings.Contains(out, "lbl1=Blocked") {
+		t.Errorf("label vocabulary missing:\n%s", out)
+	}
+	// What is already tagged, so it does not re-tag or contradict.
+	if !strings.Contains(out, "⚑lbl1,lbl2") {
+		t.Errorf("existing tags missing from the item line:\n%s", out)
+	}
+	// Colour by NAME: "#fff9db" means nothing to a language model, and the
+	// same names are what set_color accepts.
+	if !strings.Contains(out, "◧yellow") {
+		t.Errorf("colour missing or not named:\n%s", out)
+	}
+}

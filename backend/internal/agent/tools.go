@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"qomranote/backend/internal/agent/cognition"
 	"qomranote/backend/internal/domain"
@@ -40,6 +41,11 @@ const (
 	toolCreateLabel  = "create_label"
 	toolSetColor     = "set_color"
 	toolSetTask      = "set_task_done"
+	toolTree         = "board_tree"
+	toolClone        = "clone_here"
+	toolConnect      = "connect"
+	toolCreateTable  = "create_table"
+	toolHistory      = "recent_changes"
 	toolAsk          = "ask"
 	toolPreview      = "preview_layout"
 	toolFinish       = "finish"
@@ -48,6 +54,10 @@ const (
 // maxNewLabelsPerRun stops "tag everything" from spraying a taxonomy nobody
 // asked for. Reuse is nearly always the better answer.
 const maxNewLabelsPerRun = 4
+
+// maxConnectionsPerRun keeps a relationship map readable. Roughly one line per
+// two elements is the point past which a diagram stops explaining anything.
+const maxConnectionsPerRun = 12
 
 // maxToolOutputBytes bounds one observation. An unbounded read would let board
 // content crowd out the instructions.
@@ -227,6 +237,50 @@ func ToolCatalogue(allowDelete, allowLabels bool) []cognition.ToolDef {
 	}
 	tools = append(tools,
 		cognition.ToolDef{
+			Name: toolConnect,
+			Description: "Draw a labelled arrow between two elements to show a relationship — " +
+				"depends on, causes, contradicts, comes after. Use sparingly: a few meaningful " +
+				"arrows read as insight, many read as a hairball and are worse than none.",
+			Schema: obj([]string{"fromId", "toId"}, map[string]any{
+				"fromId": str("Element the arrow starts at."),
+				"toId":   str("Element it points to."),
+				"label":  str("Optional short word for the relationship."),
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolClone,
+			Description: "Show an existing card in a second place. The two stay in sync, so this is " +
+				"right when something genuinely belongs in two contexts — copying instead means the " +
+				"two drift apart the first time either is edited.",
+			Schema: obj([]string{"sourceId", "parentId"}, map[string]any{
+				"sourceId": str("Card to show elsewhere."),
+				"parentId": str("Board or column to show it in."),
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolCreateTable,
+			Description: "Create a table. This is the right answer whenever items share repeating " +
+				"attributes — a comparison, a cast list, a budget. A sequence of thoughts wants cards; " +
+				"repeating attributes want a grid.",
+			Schema: obj([]string{"parentId", "rows"}, map[string]any{
+				"parentId": str("Board or column to create it in."),
+				"title":    str("Optional table name."),
+				"rows": map[string]any{
+					"type":        "array",
+					"description": "First row is the header. Every row must have the same number of cells.",
+					"items": map[string]any{
+						"type": "array", "items": map[string]any{"type": "string"},
+					},
+				},
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolHistory,
+			Description: "See what changed on this board recently, newest first. Use for questions " +
+				"about time — what moved this week, what has gone stale, what was decided.",
+			Schema: obj(nil, map[string]any{}),
+		},
+		cognition.ToolDef{
 			Name: toolSetColor,
 			Description: "Set a card's colour. A second grouping axis that survives re-filing. " +
 				"If you colour anything, say in your summary what the colours mean.",
@@ -267,6 +321,7 @@ type staging struct {
 	task     TaskSpec
 	elements domain.ElementRepository
 	labels   domain.LabelRepository
+	txns     domain.TransactionRepository
 	emit     emitFunc
 
 	plan *Plan
@@ -286,8 +341,9 @@ type staging struct {
 	// budget rediscovering it.
 	failedCalls map[string]int
 	// asked and question hold the one clarifying question a run may pose.
-	asked    bool
-	question *Question
+	connections int
+	asked       bool
+	question    *Question
 	// everFinished stays true once the model has signalled it is done, even
 	// though the review turn un-sets `finished` to buy one more step. Without
 	// it, a run that completed and then reviewed would be reported as "may be
@@ -295,9 +351,9 @@ type staging struct {
 	everFinished bool
 }
 
-func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, emit emitFunc) *staging {
+func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, emit emitFunc) *staging {
 	return &staging{
-		runID: runID, scope: scope, task: task, elements: elements, labels: labels, emit: emit,
+		runID: runID, scope: scope, task: task, elements: elements, labels: labels, txns: txns, emit: emit,
 		plan: &Plan{}, created: map[string]ActionKind{}, failedCalls: map[string]int{},
 	}
 }
@@ -386,23 +442,27 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 	}
 
 	var in struct {
-		BoardID   string   `json:"boardId"`
-		Query     string   `json:"query"`
-		ParentID  string   `json:"parentId"`
-		ElementID string   `json:"elementId"`
-		Title     string   `json:"title"`
-		Text      string   `json:"text"`
-		URL       string   `json:"url"`
-		Section   string   `json:"section"`
-		Summary   string   `json:"summary"`
-		Tasks     []string `json:"tasks"`
-		LabelID   string   `json:"labelId"`
-		Name      string   `json:"name"`
-		Color     string   `json:"color"`
-		Done      bool     `json:"done"`
-		Because   string   `json:"because"`
-		Question  string   `json:"question"`
-		Options   []string `json:"options"`
+		BoardID   string     `json:"boardId"`
+		Query     string     `json:"query"`
+		ParentID  string     `json:"parentId"`
+		ElementID string     `json:"elementId"`
+		Title     string     `json:"title"`
+		Text      string     `json:"text"`
+		URL       string     `json:"url"`
+		Section   string     `json:"section"`
+		Summary   string     `json:"summary"`
+		Tasks     []string   `json:"tasks"`
+		LabelID   string     `json:"labelId"`
+		Name      string     `json:"name"`
+		Color     string     `json:"color"`
+		Done      bool       `json:"done"`
+		Because   string     `json:"because"`
+		Question  string     `json:"question"`
+		Options   []string   `json:"options"`
+		SourceID  string     `json:"sourceId"`
+		FromID    string     `json:"fromId"`
+		ToID      string     `json:"toId"`
+		Rows      [][]string `json:"rows"`
 	}
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &in); err != nil {
@@ -516,6 +576,120 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		}
 		s.finished, s.everFinished = true, true
 		return out("Asked. The run will pause for an answer.")
+
+	case toolTree:
+		tree, elided, err := s.renderTree(ctx, s.scope.Board.ID, 0)
+		if err != nil {
+			return fail("could not read the tree")
+		}
+		if tree == "" {
+			return out("This board has no nested boards.")
+		}
+		if elided > 0 {
+			// Silent truncation is how an agent confidently concludes that
+			// something does not exist. Say what was left out.
+			tree += fmt.Sprintf("(%d board(s) not expanded — this is as deep as the outline goes)", elided)
+		}
+		return out(tree)
+
+	case toolClone:
+		src, err := s.resolveExisting(in.SourceID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		parent, section, err := s.resolveParent(in.ParentID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if src.Type == domain.TypeClone || src.Type == domain.TypeBoard {
+			return fail("%s is a %s; only ordinary cards can be shown in two places", src.ID, src.Type)
+		}
+		id, err := s.add(Action{
+			Kind: ActCloneHere, ParentID: parent, Section: section, FromID: src.ID,
+			Summary: truncate(sanitizeText(textOf(src)), 60),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged clone " + id + ".")
+
+	case toolConnect:
+		from, err := s.resolveExisting(in.FromID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		to, err := s.resolveExisting(in.ToID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if from.ID == to.ID {
+			return fail("an element cannot be connected to itself")
+		}
+		// Asked to "connect related ideas", an unbounded model draws N-squared
+		// edges and produces a hairball strictly worse than no lines at all.
+		if s.connections >= maxConnectionsPerRun {
+			return fail("that is enough connections for one run (%d) — keep only the ones that carry meaning", maxConnectionsPerRun)
+		}
+		s.connections++
+		id, err := s.add(Action{
+			Kind: ActConnect, ParentID: s.scope.Board.ID,
+			FromID: from.ID, ToID: to.ID, Title: truncate(sanitizeName(in.Title), 40),
+			Summary: fmt.Sprintf("%s → %s", truncate(sanitizeText(textOf(from)), 24), truncate(sanitizeText(textOf(to)), 24)),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged connection " + id + ".")
+
+	case toolCreateTable:
+		parent, section, err := s.resolveParent(in.ParentID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		rows := make([][]string, 0, len(in.Rows))
+		for _, r := range in.Rows {
+			clean := make([]string, 0, len(r))
+			for _, cell := range r {
+				clean = append(clean, truncate(sanitizeName(cell), 80))
+			}
+			rows = append(rows, clean)
+		}
+		if len(rows) < 2 {
+			return fail("a table needs a header row and at least one data row")
+		}
+		width := len(rows[0])
+		for i, r := range rows {
+			if len(r) != width {
+				return fail("row %d has %d cells but the header has %d — every row must match", i, len(r), width)
+			}
+		}
+		id, err := s.add(Action{
+			Kind: ActCreateTable, ParentID: parent, Section: section,
+			Title: truncate(sanitizeName(in.Title), 40), Rows: rows,
+			Summary: fmt.Sprintf("%s (%d×%d)", firstNonEmpty(sanitizeName(in.Title), "Table"), len(rows)-1, width),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged table " + id + ".")
+
+	case toolHistory:
+		if s.txns == nil {
+			return fail("history is not available here")
+		}
+		list, err := s.txns.ListByBoard(ctx, s.scope.Board.ID, 20)
+		if err != nil {
+			return fail("could not read the history")
+		}
+		if len(list) == 0 {
+			return out("Nothing has changed on this board yet.")
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d recent change(s), newest first:\n", len(list))
+		for _, t := range list {
+			fmt.Fprintf(&b, "%s · %s · %s\n", humanAge(t.CreatedAt), originOf(t), opSummary(t))
+		}
+		return out(b.String())
 
 	case toolPreview:
 		s.reviewed = true
@@ -826,4 +1000,97 @@ func textOf(el *domain.Element) string {
 		return t
 	}
 	return el.ID
+}
+
+// humanAge renders a timestamp the way a person would say it. Relative, because
+// "3 days ago" is what a question about staleness actually means; absolute
+// timestamps would make the model do date arithmetic it is bad at.
+func humanAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
+// originOf labels who made a change. Transactions written before the agent
+// existed carry no origin at all, and those were all human.
+func originOf(t *domain.Transaction) string {
+	if t.Origin == "" {
+		return "human"
+	}
+	return t.Origin
+}
+
+// opSummary describes a transaction by what it did, since transactions store
+// operations rather than a sentence.
+func opSummary(t *domain.Transaction) string {
+	counts := map[domain.Action]int{}
+	order := make([]domain.Action, 0, 4)
+	for _, op := range t.Ops {
+		if counts[op.Action] == 0 {
+			order = append(order, op.Action)
+		}
+		counts[op.Action]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, a := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[a], a))
+	}
+	if len(parts) == 0 {
+		return "no changes"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// maxTreeDepth bounds the outline. Structure is cheap in tokens and content is
+// not, so the tree goes wide and shallow: names and counts only.
+const maxTreeDepth = 3
+
+// renderTree outlines the boards nested under one board. It reports how many
+// were left unexpanded so the model never mistakes the edge of the outline for
+// the edge of the workspace.
+func (s *staging) renderTree(ctx context.Context, boardID string, depth int) (string, int, error) {
+	if depth >= maxTreeDepth {
+		return "", 1, nil
+	}
+	kids, err := s.elements.Children(ctx, domain.ElementFilter{
+		ParentID: boardID, Types: []domain.ElementType{domain.TypeBoard},
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	var b strings.Builder
+	elided := 0
+	for _, k := range kids {
+		if k.IsDeleted() {
+			continue
+		}
+		all, err := s.elements.Children(ctx, domain.ElementFilter{ParentID: k.ID})
+		if err != nil {
+			return "", 0, err
+		}
+		live := 0
+		for _, c := range all {
+			if !c.IsDeleted() {
+				live++
+			}
+		}
+		fmt.Fprintf(&b, "%s%s · %s · %d item(s)\n",
+			strings.Repeat("  ", depth+1), k.ID, truncate(sanitizeName(contentStr(k.Content, "title")), 40), live)
+		sub, subElided, err := s.renderTree(ctx, k.ID, depth+1)
+		if err != nil {
+			return "", 0, err
+		}
+		b.WriteString(sub)
+		elided += subElided
+	}
+	return b.String(), elided, nil
 }

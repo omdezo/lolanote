@@ -207,7 +207,9 @@ export type AgentActionKind =
   | 'create_board' | 'create_column' | 'create_note' | 'create_todo'
   | 'create_link' | 'move_element' | 'rename' | 'set_note_text' | 'delete_element'
   // Attribute edits: they change how something is filed without moving it.
-  | 'apply_label' | 'set_color' | 'set_task_done';
+  | 'apply_label' | 'set_color' | 'set_task_done'
+  // Relationships, grids and cross-board references.
+  | 'connect' | 'create_table' | 'clone_here';
 
 /** Server-computed geometry, so preview and commit cannot disagree. */
 export interface AgentBox { x: number; y: number; width: number }

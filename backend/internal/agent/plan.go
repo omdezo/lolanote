@@ -44,12 +44,21 @@ const (
 	ActApplyLabel ActionKind = "apply_label"
 	ActSetColor   ActionKind = "set_color"
 	ActSetTask    ActionKind = "set_task_done"
+	// Relationships and grids. A connection expresses something no arrangement
+	// of columns can — "this blocks that" — and a table is the honest answer
+	// whenever items share repeating attributes.
+	ActConnect     ActionKind = "connect"
+	ActCreateTable ActionKind = "create_table"
+	// A clone shows one card in two places and stays in sync. Only reachable
+	// now that the clone read path authorizes its sources (GAPS_AUDIT §0).
+	ActCloneHere ActionKind = "clone_here"
 )
 
 // Creates reports whether the action brings a new element into being.
 func (k ActionKind) Creates() bool {
 	switch k {
-	case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink:
+	case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink,
+		ActConnect, ActCreateTable, ActCloneHere:
 		return true
 	}
 	return false
@@ -68,6 +77,12 @@ func (k ActionKind) ElementType() domain.ElementType {
 		return domain.TypeTaskList
 	case ActCreateLink:
 		return domain.TypeLink
+	case ActConnect:
+		return domain.TypeLine
+	case ActCreateTable:
+		return domain.TypeTable
+	case ActCloneHere:
+		return domain.TypeClone
 	}
 	return domain.TypeUnknown
 }
@@ -101,7 +116,11 @@ type Action struct {
 	LabelID string `bson:"labelId,omitempty" json:"labelId,omitempty"`
 	Color   string `bson:"color,omitempty"   json:"color,omitempty"`
 	Done    bool   `bson:"done,omitempty"    json:"done,omitempty"`
-	Section string `bson:"section,omitempty" json:"section,omitempty"`
+	// FromID / ToID carry a connection's endpoints; Rows carries a table.
+	FromID  string     `bson:"fromId,omitempty" json:"fromId,omitempty"`
+	ToID    string     `bson:"toId,omitempty"   json:"toId,omitempty"`
+	Rows    [][]string `bson:"rows,omitempty"   json:"rows,omitempty"`
+	Section string     `bson:"section,omitempty" json:"section,omitempty"`
 	// Position is assigned by the server's layout pass for elements that land
 	// directly on a canvas, so preview and commit cannot disagree.
 	Position *ColumnBox `bson:"position,omitempty" json:"position,omitempty"`
@@ -363,6 +382,21 @@ func createOp(a Action) domain.Op {
 		content["title"] = a.Title
 		content["showPreview"] = false
 		content["showDescription"] = false
+	case ActConnect:
+		// Matches what the app's own line tool writes, so an agent-drawn
+		// connector is indistinguishable from a hand-drawn one.
+		content["fromId"] = a.FromID
+		content["toId"] = a.ToID
+		content["label"] = a.Title
+		content["color"] = "#8a86a0"
+		content["weight"] = 2
+		content["curve"] = 0
+		content["endArrow"] = true
+	case ActCreateTable:
+		content["title"] = a.Title
+		content["rows"] = a.Rows
+	case ActCloneHere:
+		content["cloneSourceId"] = a.FromID
 	}
 
 	return domain.Op{

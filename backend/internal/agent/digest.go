@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -43,7 +44,11 @@ type Item struct {
 	// Both are RENDERED now: a write capability without the matching read is
 	// how a parallel taxonomy gets born — the agent would tag things it could
 	// not see were already tagged.
-	Color   string
+	Color string
+	// Cell is a coarse grid reference like "B2" for canvas elements, or "" for
+	// anything in the tray. Buckets rather than pixels: spatial relationships
+	// survive, false precision does not, and the token cost is two characters.
+	Cell    string
 	ID      string
 	Type    domain.ElementType
 	Text    string
@@ -78,6 +83,10 @@ type BoardScope struct {
 	Labels []LabelRef
 	// Members is the hash of the eligible id set as it stood at compile time.
 	Members string
+	// Instructions is the board author's standing note about how this board
+	// works. Author-written only: rules the agent inferred for itself would be
+	// invisible, compound silently, and could not be argued with.
+	Instructions string
 }
 
 // Has reports whether an id is inside the compiled scope.
@@ -172,9 +181,10 @@ func CompileScope(ctx context.Context, elements domain.ElementRepository, task T
 	}
 
 	scope := &BoardScope{
-		Board:    board,
-		Elements: map[string]*domain.Element{},
-		Occupied: Rect{Empty: true},
+		Board:        board,
+		Instructions: truncate(sanitizeBody(contentStr(board.Content, "agentInstructions")), 600),
+		Elements:     map[string]*domain.Element{},
+		Occupied:     Rect{Empty: true},
 	}
 
 	for _, el := range children {
@@ -254,6 +264,10 @@ func (r Rect) include(el *domain.Element) Rect {
 	return r
 }
 
+// ItemFor projects one element into its digest form, exported so tests can
+// build a scope the same way the compiler does.
+func ItemFor(el *domain.Element) Item { return itemFor(el) }
+
 // itemFor projects one element into its digest form, including the trust label
 // that says where its text came from.
 func itemFor(el *domain.Element) Item {
@@ -265,6 +279,7 @@ func itemFor(el *domain.Element) Item {
 		Trust:   trust,
 		Labels:  el.LabelIDs,
 		Color:   colorOf(el),
+		Cell:    cellOf(el),
 		Section: el.Location.Section,
 	}
 }
@@ -316,6 +331,26 @@ func (s *BoardScope) Render(hint string) string {
 	if len(s.ExistingColumns) > 0 {
 		fmt.Fprintf(&b, "EXISTING COLUMNS: %s\n", strings.Join(s.ExistingColumns, ", "))
 	}
+	// The board author's standing note. Fenced and trust-labelled like any
+	// other content: it is legitimate intent, and still data.
+	if s.Instructions != "" {
+		fmt.Fprintf(&b, "HOW THIS BOARD WORKS ⟨user⟩: %s\n", s.Instructions)
+	}
+	// The write capability without the matching read is how a parallel taxonomy
+	// gets born: the agent would tag things it could not see were already tagged.
+	if len(s.Labels) > 0 {
+		names := make([]string, 0, len(s.Labels))
+		for _, l := range s.Labels {
+			names = append(names, fmt.Sprintf("%s=%s", l.ID, l.Name))
+		}
+		fmt.Fprintf(&b, "LABELS (use these ids with apply_label): %s\n", strings.Join(names, ", "))
+	}
+	// Neighbourhoods, not coordinates: people describe boards as "the cluster
+	// on the left", and a model reasoning about regions makes better choices
+	// than one doing arithmetic on pixels.
+	if regions := s.regions(); regions != "" {
+		fmt.Fprintf(&b, "LAYOUT: %s\n", regions)
+	}
 	b.WriteString("\nITEMS (id · type · ⟨trust⟩ · text)\n")
 	for _, it := range s.Items {
 		text := it.Text
@@ -323,6 +358,16 @@ func (s *BoardScope) Render(hint string) string {
 			text = "(no text)"
 		}
 		fmt.Fprintf(&b, "%s · %s · ⟨%s⟩ · %s", it.ID, it.Type, it.Trust, text)
+		// The axes the agent can now act on without moving anything.
+		if len(it.Labels) > 0 {
+			fmt.Fprintf(&b, "  ⚑%s", strings.Join(it.Labels, ","))
+		}
+		if it.Color != "" {
+			fmt.Fprintf(&b, "  ◧%s", it.Color)
+		}
+		if it.Cell != "" {
+			fmt.Fprintf(&b, "  @%s", it.Cell)
+		}
 		if it.Section == domain.SectionUnsorted {
 			b.WriteString("  [unsorted]")
 		}
@@ -453,4 +498,76 @@ func colorOf(el *domain.Element) string {
 		}
 	}
 	return "custom"
+}
+
+// gridCell is the size of one coarse layout bucket, in canvas pixels. Roughly
+// one card plus its gap, so neighbours share a cell and distant things do not.
+const gridCell = 320
+
+// cellOf names the bucket an element sits in: columns as letters left to right,
+// rows as numbers top to bottom, so "B2" reads like a map reference.
+func cellOf(el *domain.Element) string {
+	if el.Location.Section != domain.SectionCanvas {
+		return "" // the tray is a list; it has no geometry
+	}
+	col := int(math.Floor(el.Location.Position.X / gridCell))
+	row := int(math.Floor(el.Location.Position.Y / gridCell))
+	return fmt.Sprintf("%s%d", colLetter(col), row+1)
+}
+
+// colLetter maps 0→A, 25→Z, 26→AA, and negatives to Z-, so a board extending
+// left of the origin still produces stable, distinct names.
+func colLetter(n int) string {
+	if n < 0 {
+		return fmt.Sprintf("Z%d", -n)
+	}
+	out := ""
+	for {
+		out = string(rune('A'+n%26)) + out
+		n = n/26 - 1
+		if n < 0 {
+			break
+		}
+	}
+	return out
+}
+
+// regions summarizes where things already sit, densest first. Only clusters
+// worth naming are listed — a line per element would just restate the item
+// list at greater length.
+func (s *BoardScope) regions() string {
+	counts := map[string]int{}
+	for _, it := range s.Items {
+		if it.Cell != "" {
+			counts[it.Cell]++
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	cells := make([]string, 0, len(counts))
+	for c := range counts {
+		cells = append(cells, c)
+	}
+	sort.Slice(cells, func(i, j int) bool {
+		if counts[cells[i]] != counts[cells[j]] {
+			return counts[cells[i]] > counts[cells[j]]
+		}
+		return cells[i] < cells[j]
+	})
+	parts := make([]string, 0, 6)
+	for _, c := range cells {
+		if len(parts) == 6 {
+			parts = append(parts, "…")
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d around %s", counts[c], c))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// contentStr reads a string field off an element's content map.
+func contentStr(c domain.Content, key string) string {
+	v, _ := c[key].(string)
+	return v
 }

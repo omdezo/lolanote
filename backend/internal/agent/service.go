@@ -128,8 +128,16 @@ func (s *Service) Create(ctx context.Context, p *domain.Principal, req CreateReq
 
 	// One run per board (G8). Checked here for a clear error; also enforced by
 	// a unique index so a concurrent create cannot slip between check and write.
+	// The guard is correct — two agents writing one board is a real hazard —
+	// but a bare rejection makes the feature look broken when a colleague holds
+	// the slot. Same invariant, legible outcome.
 	if active, err := s.runs.ActiveByBoard(ctx, req.BoardID); err == nil && active != nil {
-		return nil, ErrRunActive
+		who := "someone else"
+		if active.Tenant == p.Sub {
+			who = "you"
+		}
+		return nil, fmt.Errorf("%w: %s started one %s — it will finish shortly",
+			ErrRunActive, who, humanAge(active.CreatedAt))
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
@@ -265,7 +273,7 @@ func (s *Service) execute(ctx context.Context, p *domain.Principal, runID string
 	}
 
 	emit := func(t EventType, msg string, data map[string]any) { s.emit(ctx, run, t, msg, data) }
-	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
+	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels, s.txnRepo).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
 	run.Usage.Add(usage)
 	if err != nil {
 		s.finishWithReason(ctx, run, terminalFor(err), reasonFor(err))

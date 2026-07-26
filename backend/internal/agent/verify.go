@@ -160,6 +160,27 @@ func shapeOf(a Action) error {
 		if a.ElementID == "" {
 			return fmt.Errorf("ticking needs a target")
 		}
+	case ActCloneHere:
+		if a.FromID == "" || a.ParentID == "" {
+			return fmt.Errorf("a clone needs a source and a destination")
+		}
+	case ActConnect:
+		if a.FromID == "" || a.ToID == "" {
+			return fmt.Errorf("a connection needs both ends")
+		}
+		if a.FromID == a.ToID {
+			return fmt.Errorf("an element cannot be connected to itself")
+		}
+	case ActCreateTable:
+		if len(a.Rows) < 2 {
+			return fmt.Errorf("a table needs a header row and at least one data row")
+		}
+		width := len(a.Rows[0])
+		for i, r := range a.Rows {
+			if len(r) != width {
+				return fmt.Errorf("table row %d has %d cells, header has %d", i, len(r), width)
+			}
+		}
 	default:
 		return fmt.Errorf("unknown action %q", a.Kind)
 	}
