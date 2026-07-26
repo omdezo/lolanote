@@ -178,6 +178,11 @@ type Plan struct {
 	// the ops, never while planning: a preview that is discarded must leave the
 	// user's taxonomy exactly as it found it.
 	NewLabels []*domain.Label `bson:"newLabels,omitempty" json:"newLabels,omitempty"`
+	// Destinations are boards outside this run's root that the plan files into.
+	// Recorded here so APPLY can validate each against the human's own edit
+	// rights before widening the grant — the plan states an intention, the
+	// service decides whether it is permitted.
+	Destinations []string `bson:"destinations,omitempty" json:"destinations,omitempty"`
 	// NewComments are the bodies for any comment threads this plan creates.
 	// Like labels, they are written at APPLY time only, so a discarded preview
 	// leaves no orphan threads behind.

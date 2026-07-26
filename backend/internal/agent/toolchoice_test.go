@@ -3,11 +3,15 @@ package agent_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	"qomranote/backend/internal/agent"
 	"qomranote/backend/internal/agent/cognition"
+	"qomranote/backend/internal/domain"
 )
 
 // Tool-selection evals.
@@ -208,5 +212,111 @@ func TestAudit_ListsOnlyRunsThatChangedSomething(t *testing.T) {
 	}
 	if e.Reverted {
 		t.Error("an applied run was reported as reverted")
+	}
+}
+
+// Every implemented tool must be OFFERED. A capability that exists in the
+// execute switch and not in the catalogue is one nobody can reach, which is
+// indistinguishable from never having built it — and it fails silently, because
+// the code compiles, the tests pass, and the model simply never calls it.
+//
+// This shipped for real: eleven tools, including all of vision, composition and
+// repair, were implemented and absent from the catalogue.
+func TestToolCatalogue_OffersEveryImplementedTool(t *testing.T) {
+	source, err := os.ReadFile("tools.go")
+	if err != nil {
+		t.Fatalf("read tools.go: %v", err)
+	}
+	src := string(source)
+
+	// Implemented: every `case toolX:` in the execute switch.
+	implemented := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\tcase (tool[A-Za-z]+)`).FindAllStringSubmatch(src, -1) {
+		implemented[m[1]] = true
+	}
+	// Offered: every `Name: toolX` in the catalogue.
+	offered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`Name:\s+(tool[A-Za-z]+)`).FindAllStringSubmatch(src, -1) {
+		offered[m[1]] = true
+	}
+
+	if len(implemented) == 0 || len(offered) == 0 {
+		t.Fatal("could not parse the tool surface; this test needs updating alongside tools.go")
+	}
+	var missing []string
+	for name := range implemented {
+		if !offered[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("%d tool(s) are implemented but never offered to the model: %s",
+			len(missing), strings.Join(missing, ", "))
+	}
+
+	// And the catalogue actually built at runtime must be non-trivial, so a
+	// refactor that empties it fails here rather than in production.
+	if n := len(agent.ToolCatalogue(true, true)); n < len(implemented)-2 {
+		t.Errorf("the built catalogue offers %d tools; %d are implemented", n, len(implemented))
+	}
+}
+
+// Cross-board filing widens containment, so it is the one capability that could
+// turn the agent into a way to write somewhere the person cannot. These pin the
+// two properties that stop it: the destination must have been DISCOVERED by the
+// run, and it must be one the HUMAN can already edit.
+func TestFiling_RefusesABoardTheRunNeverFound(t *testing.T) {
+	h := newHarness(t,
+		cognition.ScriptedStep{Tools: []cognition.ScriptedCall{
+			// A board id that never appeared in any tool output — exactly what
+			// an id lifted from card text looks like.
+			{Name: "file_to_board", Input: map[string]any{
+				"elementId": cardID(boardID, 0),
+				"boardId":   "ffffffffffffffffffffffff",
+			}},
+		}},
+		finish("done"),
+		confirm(),
+	)
+	h.seedBoard(t, boardID, "a note")
+
+	run, err := h.svc.Create(context.Background(), h.principal, agent.CreateRequest{
+		BoardID: boardID, Intent: "File this elsewhere", Autonomy: agent.AutonomyPreview,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	final := h.awaitState(t, run.ID, agent.StateProposed, agent.StatePartial)
+	if final.Plan != nil {
+		for _, a := range final.Plan.Actions {
+			if a.Kind == agent.ActMove && a.ParentID == "ffffffffffffffffffffffff" {
+				t.Fatal("filed to a board the run never discovered")
+			}
+		}
+		if len(final.Plan.Destinations) > 0 {
+			t.Errorf("an undiscovered board became a destination: %v", final.Plan.Destinations)
+		}
+	}
+}
+
+// The grant carries destinations only for boards the human can edit, and the
+// stored delegation is never widened — a destination authorised for one commit
+// must not persist into the next.
+func TestFiling_GrantIsAttenuatedNotExpanded(t *testing.T) {
+	d := &domain.Delegation{RootBoardID: "root"}
+	if got := d.Roots(); len(got) != 1 || got[0] != "root" {
+		t.Fatalf("a grant with no destinations should permit only its root, got %v", got)
+	}
+	d.DestinationBoardIDs = []string{"other"}
+	roots := d.Roots()
+	if len(roots) != 2 || roots[0] != "root" || roots[1] != "other" {
+		t.Fatalf("Roots() must list the root first, then destinations; got %v", roots)
+	}
+	// A nil grant permits nothing rather than everything — the direction a
+	// mistake here has to fail in.
+	var none *domain.Delegation
+	if got := none.Roots(); got != nil {
+		t.Errorf("a nil delegation returned roots %v; it must permit nothing", got)
 	}
 }

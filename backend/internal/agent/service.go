@@ -482,9 +482,17 @@ func (s *Service) commit(ctx context.Context, p *domain.Principal, run *Run, adj
 	// The agent's principal for this write: the human's identity, attenuated by
 	// the run's grant. Every op is re-validated against it inside the same write
 	// path a human's drag uses.
+	// Widen containment to the boards this approved plan files into — and only
+	// after checking each against the HUMAN's own edit rights, with their own
+	// principal. The grant is a copy: the stored delegation is never mutated, so
+	// a destination authorised for this commit does not persist into the next.
+	grant := run.Delegation
+	if dests := s.authorizeDestinations(ctx, p, effective); len(dests) > 0 {
+		grant.DestinationBoardIDs = dests
+	}
 	agentPrincipal := &domain.Principal{
 		Sub: p.Sub, Email: p.Email, Name: p.Name,
-		Delegation: &run.Delegation,
+		Delegation: &grant,
 	}
 	txn, err := s.txns.ApplyWithMeta(ctx, agentPrincipal, run.Task.RootBoardID, "", ops, service.TxnMeta{
 		TxnID:      run.ID,

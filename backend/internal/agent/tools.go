@@ -43,6 +43,7 @@ const (
 	toolSetColor     = "set_color"
 	toolSetTask      = "set_task_done"
 	toolTree         = "board_tree"
+	toolFileTo       = "file_to_board"
 	toolLook         = "look_at"
 	toolClone        = "clone_here"
 	toolComment      = "comment"
@@ -326,7 +327,135 @@ func ToolCatalogue(allowDelete, allowLabels bool) []cognition.ToolDef {
 			}),
 		},
 	)
+	// Reading, composition and repair. Every one of these has an execute case;
+	// a tool that exists in the switch and not in this catalogue is a
+	// capability nobody can reach, which is indistinguishable from not having
+	// built it. ToolCatalogueCovers, exercised by a test, keeps the two in step.
+	tools = append(tools,
+		cognition.ToolDef{
+			Name: toolTree,
+			Description: "See the shape of everything nested under this board — child boards by name " +
+				"and how much each holds, without their contents. Use before filing things across " +
+				"boards, so you place them somewhere that already exists.",
+			Schema: obj(nil, map[string]any{}),
+		},
+		cognition.ToolDef{
+			Name: toolLook,
+			Description: "Read an image or a PDF on this board — what it SHOWS, not just its name. " +
+				"For an image that is OCR and layout: pull the text out of a screenshot, compare " +
+				"mockups. For a PDF it is the whole document, tables and figures included. Only " +
+				"call it when the contents matter; filenames are already in the board listing.",
+			Schema: obj([]string{"elementId"}, map[string]any{
+				"elementId": str("The IMAGE or FILE element to read."),
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolReadURL,
+			Description: "Fetch the title and description of a URL already on this board or given to " +
+				"you, so a link carries what the page actually is. Never invent a URL.",
+			Schema: obj([]string{"url"}, map[string]any{"url": str("Full http(s) URL.")}),
+		},
+		cognition.ToolDef{
+			Name: toolArrange,
+			Description: "Position elements on the canvas so they read well. You choose the SHAPE; " +
+				"the server computes the coordinates, so you never give x/y. " +
+				"grid = rows that wrap · row = one horizontal band, for a sequence · " +
+				"column = one vertical stack, for a ranking · tidy = keep roughly where they are, " +
+				"just remove overlap and even the spacing.",
+			Schema: obj([]string{"elementIds", "layout"}, map[string]any{
+				"elementIds": map[string]any{
+					"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Elements to place, in the order they should read.",
+				},
+				"layout": map[string]any{
+					"type": "string",
+					"enum": []string{string(LayoutGrid), string(LayoutRow), string(LayoutColumn), string(LayoutTidy)},
+				},
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolTidy,
+			Description: "Tidy everything loose on this board's canvas at once: remove overlaps, even " +
+				"the gutters, align to the grid, while keeping each element roughly where it was. " +
+				"The right answer for \"clean this up\" on a board somebody arranged by hand.",
+			Schema: obj(nil, map[string]any{}),
+		},
+		cognition.ToolDef{
+			Name: toolHeading,
+			Description: "Put a large text landmark on the canvas to name a region. Headings group by " +
+				"proximity without boxing anything in — often what a freeform board wants instead " +
+				"of another column.",
+			Schema: obj([]string{"text"}, map[string]any{"text": str("Short heading, a few words.")}),
+		},
+		cognition.ToolDef{
+			Name: toolResize,
+			Description: "Change how much space something takes. For EMPHASIS — one large element gives " +
+				"a board a focal point — or for CONSISTENCY, making a ragged group uniform.",
+			Schema: obj([]string{"elementIds", "size"}, map[string]any{
+				"elementIds": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"size":       map[string]any{"type": "string", "enum": []string{"small", "medium", "large"}},
+			}),
+		},
+		cognition.ToolDef{
+			Name:        toolAssign,
+			Description: "Give a task an owner. Work with no owner is the work that quietly does not happen.",
+			Schema: obj([]string{"elementId", "userId"}, map[string]any{
+				"elementId": str("The task to assign."),
+				"userId":    str("A person id from the PEOPLE list you were shown. Never invent one."),
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolRemind,
+			Description: "Set when a task is due, so the reminder sweep can act on it. Read the date " +
+				"out of the text rather than inventing one.",
+			Schema: obj([]string{"elementId", "when"}, map[string]any{
+				"elementId": str("The task."),
+				"when":      str("RFC3339 timestamp, e.g. 2026-09-01T09:00:00Z."),
+			}),
+		},
+		cognition.ToolDef{
+			Name: toolFileTo,
+			Description: "Move something onto a DIFFERENT board — the one it actually belongs on. Only " +
+				"boards you have found with search or board_tree, and only ones the user can already " +
+				"edit; anything else is refused. Use it to clear a tray of captures onto the " +
+				"projects they are about.",
+			Schema: obj([]string{"elementId", "boardId"}, map[string]any{
+				"elementId": str("Element to file."),
+				"boardId":   str("Destination board id, from search or board_tree. Never invent one."),
+			}),
+		},
+	)
+
 	if allowDelete {
+		// Merge and split trash what they replace, so they are offered on the
+		// same terms as delete: only where a person will see the plan first.
+		tools = append(tools,
+			cognition.ToolDef{
+				Name: toolMerge,
+				Description: "Combine several cards that say the same thing into one, and trash the " +
+					"originals. For genuine duplicates and fragments of a single thought — not to " +
+					"shorten a board.",
+				Schema: obj([]string{"elementIds", "text"}, map[string]any{
+					"elementIds": map[string]any{
+						"type": "array", "items": map[string]any{"type": "string"},
+						"description": "Cards to combine. Two or more.",
+					},
+					"text": str("The merged content. Keep everything that mattered in any of them."),
+				}),
+			},
+			cognition.ToolDef{
+				Name: toolSplit,
+				Description: "Break one card carrying several separate ideas into one card each, and " +
+					"trash the original. Use when a card has to be read twice to find the thing you wanted.",
+				Schema: obj([]string{"elementId", "texts"}, map[string]any{
+					"elementId": str("Card to break up."),
+					"texts": map[string]any{
+						"type": "array", "items": map[string]any{"type": "string"},
+						"description": "One entry per resulting card. Two or more.",
+					},
+				}),
+			},
+		)
 		tools = append(tools, cognition.ToolDef{
 			Name: toolDelete,
 			Description: "Move an element to the trash. Only when the user clearly asked for removal. " +
@@ -375,12 +504,16 @@ type staging struct {
 	// still being built.
 	placedThisRun map[string]bool
 	movedThisRun  map[string]bool
-	links         LinkResolver
-	urlsRead      int
-	connections   int
-	commented     bool
-	asked         bool
-	question      *Question
+	// discovered is every board id this run legitimately found, via search or
+	// the board tree. Filing may only target these, which is what stops board
+	// content from naming a board at the agent and having it honoured.
+	discovered  map[string]bool
+	links       LinkResolver
+	urlsRead    int
+	connections int
+	commented   bool
+	asked       bool
+	question    *Question
 	// everFinished stays true once the model has signalled it is done, even
 	// though the review turn un-sets `finished` to buy one more step. Without
 	// it, a run that completed and then reviewed would be reported as "may be
@@ -673,6 +806,32 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		// wrote, and it is labelled as such wherever it lands.
 		return out(fmt.Sprintf("⟨web⟩ %s — %s",
 			truncate(sanitizeText(meta.Title), 120), truncate(sanitizeText(meta.Description), 240)))
+
+	case toolFileTo:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type == domain.TypeBoard {
+			return fail("moving a whole board between boards is not something this run can do")
+		}
+		if err := s.noteDestination(ctx, in.BoardID); err != nil {
+			return fail("%v", err)
+		}
+		if s.movedThisRun == nil {
+			s.movedThisRun = map[string]bool{}
+		}
+		s.movedThisRun[el.ID] = true
+		if _, err := s.add(Action{
+			Kind: ActMove, ElementID: el.ID, ParentID: in.BoardID,
+			Section: string(domain.SectionUnsorted),
+			Summary: truncate(sanitizeText(textOf(el)), 60),
+		}); err != nil {
+			return fail("%v", err)
+		}
+		// The tray, not the canvas: dropping someone else's board a card at
+		// coordinates chosen here would land it on top of their work.
+		return out("Staged: filed to the other board's tray.")
 
 	case toolTree:
 		tree, elided, err := s.renderTree(ctx, s.scope.Board.ID, 0)
@@ -1059,6 +1218,11 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		fmt.Fprintf(&b, "%d matches for %q:\n", len(hits), q)
 		for _, el := range hits {
 			text, trust := textFor(el)
+			if el.Type == domain.TypeBoard {
+				// Found by the run's OWN search, so filing may target it. A
+				// board id sitting in card text never reaches here.
+				s.markDiscovered(el.ID)
+			}
 			fmt.Fprintf(&b, "%s · %s · ⟨%s⟩ · %s\n", el.ID, el.Type, trust, truncate(sanitizeText(text), 90))
 		}
 		return out(b.String())
@@ -1406,6 +1570,9 @@ func (s *staging) renderTree(ctx context.Context, boardID string, depth int) (st
 				live++
 			}
 		}
+		// Walking the tree is discovery too: these are boards the run has seen
+		// for itself, so filing may target them.
+		s.markDiscovered(k.ID)
 		fmt.Fprintf(&b, "%s%s · %s · %d item(s)\n",
 			strings.Repeat("  ", depth+1), k.ID, truncate(sanitizeName(contentStr(k.Content, "title")), 40), live)
 		sub, subElided, err := s.renderTree(ctx, k.ID, depth+1)

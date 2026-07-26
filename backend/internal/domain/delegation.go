@@ -42,7 +42,34 @@ type Delegation struct {
 	// an entire board in one commit.
 	MaxOps int `bson:"maxOps" json:"maxOps"`
 
+	// DestinationBoardIDs widens containment to a CLOSED, explicit list of
+	// boards an approved plan files into. Filing an item onto the board it
+	// actually belongs on is the commonest real chore, and a single-subtree
+	// grant cannot express it.
+	//
+	// Three properties keep this ATTENUATION rather than expansion:
+	//   - Every id is validated against the HUMAN's own edit rights at apply
+	//     time, so the grant can never reach further than the person it acts
+	//     for.
+	//   - It is derived from a plan a person approved, not from the model's
+	//     request, so board content cannot steer it.
+	//   - It is minted per commit and expires with the run.
+	DestinationBoardIDs []string `bson:"destinationBoardIds,omitempty" json:"destinationBoardIds,omitempty"`
+
 	ExpiresAt time.Time `bson:"expiresAt" json:"expiresAt"`
+}
+
+// Roots is every board this grant may write inside: its containment root, plus
+// any destination an approved plan added. Containment checks run against the
+// whole set rather than the root alone.
+func (d *Delegation) Roots() []string {
+	if d == nil {
+		return nil
+	}
+	out := make([]string, 0, len(d.DestinationBoardIDs)+1)
+	out = append(out, d.RootBoardID)
+	out = append(out, d.DestinationBoardIDs...)
+	return out
 }
 
 // Capability is one permitted operation class.

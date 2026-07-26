@@ -313,10 +313,14 @@ func (s *TransactionService) verifyDelegation(ctx context.Context, p *domain.Pri
 	if op.Action == domain.ActionCreate {
 		target = createParentID(op)
 	}
-	if err := s.assertWithin(ctx, target, d.RootBoardID, cache); err != nil {
+	// Containment is now "inside the root, OR inside a destination an approved
+	// plan named". Destinations are validated against the human's own edit
+	// rights before the grant is minted, so this can never reach further than
+	// the person the agent acts for.
+	if err := s.assertWithinAny(ctx, target, d.Roots(), cache); err != nil {
 		return err
 	}
-	if err := s.verifyMoveTarget(ctx, op, d.RootBoardID, cache); err != nil {
+	if err := s.verifyMoveTargetAny(ctx, op, d.Roots(), cache); err != nil {
 		return err
 	}
 	// Structural denials the agent may never reach, whatever it proposes.
@@ -667,4 +671,42 @@ func toFloat(v any) float64 {
 func isHome(el *domain.Element) bool {
 	home, _ := el.Content["isHome"].(bool)
 	return el.Type == domain.TypeBoard && home
+}
+
+// assertWithinAny passes when the element sits inside ANY permitted root. The
+// error surfaced is the primary root's, so a denial reads as an ordinary
+// containment failure rather than naming boards the caller never asked about.
+func (s *TransactionService) assertWithinAny(ctx context.Context, id string, roots []string, cache map[string]bool) error {
+	if len(roots) == 0 {
+		return domain.ErrForbidden
+	}
+	var first error
+	for i, root := range roots {
+		err := s.assertWithin(ctx, id, root, cache)
+		if err == nil {
+			return nil
+		}
+		if i == 0 {
+			first = err
+		}
+	}
+	return first
+}
+
+// verifyMoveTargetAny is the same widening for a move's destination parent.
+func (s *TransactionService) verifyMoveTargetAny(ctx context.Context, op *domain.Op, roots []string, cache map[string]bool) error {
+	if len(roots) == 0 {
+		return domain.ErrForbidden
+	}
+	var first error
+	for i, root := range roots {
+		err := s.verifyMoveTarget(ctx, op, root, cache)
+		if err == nil {
+			return nil
+		}
+		if i == 0 {
+			first = err
+		}
+	}
+	return first
 }
