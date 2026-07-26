@@ -370,7 +370,20 @@ func textFor(el *domain.Element) (string, string) {
 		}
 		return str("url"), trustWeb
 	case domain.TypeImage, domain.TypeFile:
-		return str("filename"), trustFile
+		// An IMAGE stores {url, attachmentId, caption} and no filename, so
+		// reading only "filename" rendered every picture on the board as
+		// "(no text)" — anonymous, and impossible to connect to a request that
+		// says "the pic". Fall through what an image might actually carry, and
+		// never return nothing: a description is what makes it referenceable.
+		for _, key := range []string{"caption", "filename", "title", "alt"} {
+			if v := str(key); v != "" {
+				return v, trustFile
+			}
+		}
+		if el.Type == domain.TypeImage {
+			return "(an image — call look_at to see it)", trustFile
+		}
+		return "(a file — call look_at to read it)", trustFile
 	case domain.TypeBoard, domain.TypeAlias, domain.TypeDocument, domain.TypeTable, domain.TypeTaskList:
 		return str("title"), trustUser
 	case domain.TypeColorSwatch:

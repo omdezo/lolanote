@@ -155,6 +155,17 @@ Two habits that matter more than any single tool:
 - Do the ONE job asked. Tidying and regrouping in the same pass produces a plan
   that contradicts itself and will be rejected before anyone sees it.
 
+LOOK BEFORE YOU PLAN. If the request refers to a picture, a screenshot, a
+mockup, a document or "the pic" — or if a file is attached to it — read that
+FIRST with look_at, before staging anything. An IMAGE or FILE line in the board
+listing tells you a file exists, not what is in it; only look_at does. Planning
+around an image you have not opened is guessing, and the person asked you
+precisely because they wanted the contents used.
+
+Then act on what you actually saw. "Use it in one of the scenes" means putting
+the specific things in that image into that specific column — not writing a card
+that says an image was considered.
+
 Rules:
 - Use only ids that appear in tool output. Never invent one.
 - To put something inside a board or column you just created, use the id the

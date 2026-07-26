@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,6 +64,9 @@ type ImageFetcher interface {
 type HTTPImageFetcher struct {
 	Attachments domain.AttachmentRepository
 	Client      *http.Client
+	// LoopbackBase is where this server answers its own blob requests.
+	// Defaults to the local listener.
+	LoopbackBase string
 }
 
 // NewHTTPImageFetcher builds a fetcher with a short timeout: a slow blob store
@@ -97,7 +101,13 @@ func (f *HTTPImageFetcher) Fetch(ctx context.Context, attachmentID string) ([]by
 		return nil, "", fmt.Errorf("%s has not finished uploading", att.Filename)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, att.PublicURL, nil)
+	// Fetch over the LOOPBACK, not the stored public URL. That URL is baked in
+	// at upload time from PUBLIC_API_BASE, so it may point at a tunnel, an old
+	// hostname, or a domain this container cannot resolve — and even when it
+	// resolves, the server would be reaching its own blob by going out to the
+	// internet and back. The path is what identifies the object; the origin is
+	// just how you get there.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.reachable(att.PublicURL), nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("that image could not be read")
 	}
@@ -122,3 +132,43 @@ func (f *HTTPImageFetcher) Fetch(ctx context.Context, attachmentID string) ([]by
 }
 
 var _ ImageFetcher = (*HTTPImageFetcher)(nil)
+
+// reachable rewrites a stored public URL onto an address this process can
+// actually reach.
+//
+// Local-driver blobs are served by this very server, so the loopback is both
+// correct and immune to how the deployment is addressed from outside. Anything
+// on another host — R2, a CDN — is left alone, because there the public URL is
+// genuinely where the bytes live.
+func (f *HTTPImageFetcher) reachable(publicURL string) string {
+	u, err := url.Parse(publicURL)
+	if err != nil || u.Path == "" {
+		return publicURL
+	}
+	if !strings.HasPrefix(u.Path, "/api/v1/blob/") {
+		return publicURL // not ours to serve
+	}
+	base := f.LoopbackBase
+	if base == "" {
+		base = "http://127.0.0.1:8080"
+	}
+	out := strings.TrimSuffix(base, "/") + u.Path
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
+}
+
+// On points the fetcher at this server's own listener. addr is the bind address
+// (":8080"), which is turned into a loopback URL — a bare port is not something
+// an HTTP client can dial.
+func (f *HTTPImageFetcher) On(addr string) *HTTPImageFetcher {
+	if addr == "" {
+		return f
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	f.LoopbackBase = "http://" + strings.TrimPrefix(addr, "http://")
+	return f
+}

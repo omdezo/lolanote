@@ -583,3 +583,44 @@ func TestScope_OrganizedBoardIsFullyVisible(t *testing.T) {
 		}
 	}
 }
+
+// An IMAGE stores {url, attachmentId, caption} and no filename, so reading only
+// "filename" rendered every picture as "(no text)". "Based on the pic, update
+// the scenes" then had nothing to attach the word "pic" to — the agent could
+// see that a file existed and not what it was or that it could be opened.
+func TestDigest_ImagesAreIdentifiableAndAdvertiseLookAt(t *testing.T) {
+	mk := func(id string, content domain.Content, typ domain.ElementType) agent.Item {
+		return agent.ItemFor(&domain.Element{
+			ID: id, Type: typ,
+			Location: domain.Location{ParentID: "b1", Section: domain.SectionCanvas},
+			Content:  content,
+		})
+	}
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: "b1", Type: domain.TypeBoard},
+		Elements: map[string]*domain.Element{},
+		Items: []agent.Item{
+			// The real shape the client writes: no filename anywhere.
+			mk("img1", domain.Content{"url": "/api/v1/blob/x", "attachmentId": "a1"}, domain.TypeImage),
+			mk("img2", domain.Content{"caption": "the rooftop chase"}, domain.TypeImage),
+			mk("file1", domain.Content{"filename": "brief.pdf"}, domain.TypeFile),
+		},
+	}
+	out := scope.Render("")
+
+	if strings.Contains(out, "(no text)") {
+		t.Errorf("an image rendered as anonymous — nothing connects it to a request:\n%s", out)
+	}
+	// An unnamed image must still say it can be opened, or the agent has no
+	// reason to think looking is possible.
+	if !strings.Contains(out, "look_at") {
+		t.Errorf("nothing tells the agent the file is readable:\n%s", out)
+	}
+	// A caption is the best name available and must win over the fallback.
+	if !strings.Contains(out, "the rooftop chase") {
+		t.Errorf("a captioned image lost its caption:\n%s", out)
+	}
+	if !strings.Contains(out, "brief.pdf") {
+		t.Errorf("a named file lost its filename:\n%s", out)
+	}
+}
