@@ -160,6 +160,10 @@ func shapeOf(a Action) error {
 		if a.ElementID == "" {
 			return fmt.Errorf("ticking needs a target")
 		}
+	case ActComment:
+		if a.Text == "" {
+			return fmt.Errorf("a comment needs something to say")
+		}
 	case ActCloneHere:
 		if a.FromID == "" || a.ParentID == "" {
 			return fmt.Errorf("a clone needs a source and a destination")
@@ -423,7 +427,7 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 	// pointing at labels that were never created.
 	out := &Plan{
 		Summary: p.Summary, Notes: p.Notes,
-		Fingerprint: p.Fingerprint, NewLabels: p.NewLabels,
+		Fingerprint: p.Fingerprint, NewLabels: p.NewLabels, NewComments: p.NewComments,
 	}
 	for i, a := range p.Actions {
 		if dropped[i] {

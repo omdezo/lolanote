@@ -107,11 +107,12 @@ type Planner struct {
 	elements domain.ElementRepository
 	labels   domain.LabelRepository
 	txns     domain.TransactionRepository
+	images   ImageFetcher
 }
 
 // NewPlanner constructs the loop.
-func NewPlanner(p cognition.Provider, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository) *Planner {
-	return &Planner{provider: p, elements: elements, labels: labels, txns: txns}
+func NewPlanner(p cognition.Provider, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher) *Planner {
+	return &Planner{provider: p, elements: elements, labels: labels, txns: txns, images: images}
 }
 
 // emitFunc records a journal event. The loop emits rather than logs so security
@@ -122,7 +123,7 @@ type emitFunc func(EventType, string, map[string]any)
 func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, runID string, emit emitFunc, prior *Plan) (*Plan, cognition.Usage, error) {
 	var usage cognition.Usage
 
-	stage := newStaging(runID, scope, task, pl.elements, pl.labels, pl.txns, emit)
+	stage := newStaging(runID, scope, task, pl.elements, pl.labels, pl.txns, pl.images, emit)
 	// Deletes are offered only when the run may actually make them. An
 	// unattended run never sees the capability, so it cannot reach for it.
 	// Label tools appear only where labels can actually be resolved, so a
@@ -207,7 +208,15 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 		}
 		// Every outcome for one assistant turn rides in a single user message;
 		// splitting them teaches the model to stop calling tools in parallel.
-		messages = append(messages, cognition.Message{Role: cognition.RoleUser, Outcomes: outcomes})
+		// Any image the run asked to see rides on the same user turn as the
+		// tool results, so the model sees the picture and the observation
+		// together rather than a reference to something it cannot look at.
+		userTurn := cognition.Message{Role: cognition.RoleUser, Outcomes: outcomes}
+		if len(stage.pendingImages) > 0 {
+			userTurn.Images = stage.pendingImages
+			stage.pendingImages = nil
+		}
+		messages = append(messages, userTurn)
 
 		if stage.finished {
 			// One look before the plan reaches a person. Cheap by construction:

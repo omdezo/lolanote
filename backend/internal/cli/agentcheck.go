@@ -104,7 +104,7 @@ var agentCheckCmd = &cobra.Command{
 
 		fmt.Println("──── planning ────")
 		start := time.Now()
-		plan, usage, err := agent.NewPlanner(provider, elements, nil, nil).
+		plan, usage, err := agent.NewPlanner(provider, elements, nil, nil, nil).
 			Run(ctx, scope, task, "5eed000000000000000000ru", emit, nil)
 		elapsed := time.Since(start)
 

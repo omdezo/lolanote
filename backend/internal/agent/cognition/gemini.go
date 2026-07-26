@@ -3,6 +3,7 @@ package cognition
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,8 +68,15 @@ type geminiFunctionResponse struct {
 
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
+	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+// geminiInlineData carries an image as base64, the same bytes Anthropic gets.
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type geminiContent struct {
@@ -228,6 +236,12 @@ func geminiContents(msgs []Message) []geminiContent {
 				payload = map[string]any{"error": r.Content}
 			}
 			parts = append(parts, geminiPart{FunctionResponse: &geminiFunctionResponse{Name: r.Name, Response: payload}})
+		}
+		for _, img := range m.Images {
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{
+				MimeType: img.MediaType,
+				Data:     base64.StdEncoding.EncodeToString(img.Data),
+			}})
 		}
 		if len(parts) == 0 {
 			continue

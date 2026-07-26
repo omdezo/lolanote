@@ -34,6 +34,8 @@ type Service struct {
 	txnRepo  domain.TransactionRepository
 	access   *service.AccessResolver
 	labels   domain.LabelRepository
+	comments domain.CommentRepository
+	images   ImageFetcher
 	runs     RunStore
 	events   EventStore
 	provider cognition.Provider
@@ -54,6 +56,8 @@ type Config struct {
 	TxnRepo     domain.TransactionRepository
 	Access      *service.AccessResolver
 	Labels      domain.LabelRepository
+	Comments    domain.CommentRepository
+	Images      ImageFetcher
 	Runs        RunStore
 	Events      EventStore
 	Provider    cognition.Provider
@@ -70,6 +74,8 @@ func NewService(cfg Config) *Service {
 	return &Service{
 		elements:    cfg.Elements,
 		labels:      cfg.Labels,
+		comments:    cfg.Comments,
+		images:      cfg.Images,
 		users:       cfg.Users,
 		txns:        cfg.Txns,
 		txnRepo:     cfg.TxnRepo,
@@ -273,7 +279,7 @@ func (s *Service) execute(ctx context.Context, p *domain.Principal, runID string
 	}
 
 	emit := func(t EventType, msg string, data map[string]any) { s.emit(ctx, run, t, msg, data) }
-	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels, s.txnRepo).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
+	plan, usage, err := NewPlanner(s.provider, s.elements, s.labels, s.txnRepo, s.images).Run(ctx, scope, run.Task, run.ID, emit, run.Plan)
 	run.Usage.Add(usage)
 	if err != nil {
 		s.finishWithReason(ctx, run, terminalFor(err), reasonFor(err))
@@ -434,6 +440,26 @@ func (s *Service) commit(ctx context.Context, p *domain.Principal, run *Run, adj
 			if err := s.labels.Insert(ctx, l); err != nil {
 				s.finishWithReason(ctx, run, StateFailed, "could not create the new labels")
 				return nil, err
+			}
+		}
+	}
+
+	// Comment bodies, like labels, exist only in the plan until this moment.
+	// The thread elements are created by the ops; these are what make them say
+	// anything.
+	if s.comments != nil {
+		for _, c := range effective.NewComments {
+			if c == nil || c.AuthorID != p.Sub {
+				continue
+			}
+			if c.ID == "" {
+				c.ID = s.newID()
+			}
+			if c.CreatedAt.IsZero() {
+				c.CreatedAt = time.Now().UTC()
+			}
+			if err := s.comments.Insert(ctx, c); err != nil {
+				s.log.Warn("agent: could not write comment body", zap.Error(err))
 			}
 		}
 	}

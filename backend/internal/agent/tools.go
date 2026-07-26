@@ -42,7 +42,9 @@ const (
 	toolSetColor     = "set_color"
 	toolSetTask      = "set_task_done"
 	toolTree         = "board_tree"
+	toolLook         = "look_at"
 	toolClone        = "clone_here"
+	toolComment      = "comment"
 	toolConnect      = "connect"
 	toolCreateTable  = "create_table"
 	toolHistory      = "recent_changes"
@@ -248,6 +250,15 @@ func ToolCatalogue(allowDelete, allowLabels bool) []cognition.ToolDef {
 			}),
 		},
 		cognition.ToolDef{
+			Name: toolComment,
+			Description: "Leave one short note on the board explaining a decision that is not obvious " +
+				"from the result. At most one per run, and only where the reasoning genuinely helps: " +
+				"an assistant that annotates everything teaches people to ignore annotations.",
+			Schema: obj([]string{"text"}, map[string]any{
+				"text": str("What you want the reader to know, in a sentence or two."),
+			}),
+		},
+		cognition.ToolDef{
 			Name: toolClone,
 			Description: "Show an existing card in a second place. The two stay in sync, so this is " +
 				"right when something genuinely belongs in two contexts — copying instead means the " +
@@ -341,9 +352,13 @@ type staging struct {
 	// budget rediscovering it.
 	failedCalls map[string]int
 	// asked and question hold the one clarifying question a run may pose.
-	connections int
-	asked       bool
-	question    *Question
+	images        ImageFetcher
+	imagesSeen    int
+	pendingImages []cognition.ImagePart
+	connections   int
+	commented     bool
+	asked         bool
+	question      *Question
 	// everFinished stays true once the model has signalled it is done, even
 	// though the review turn un-sets `finished` to buy one more step. Without
 	// it, a run that completed and then reviewed would be reported as "may be
@@ -351,9 +366,9 @@ type staging struct {
 	everFinished bool
 }
 
-func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, emit emitFunc) *staging {
+func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, txns domain.TransactionRepository, images ImageFetcher, emit emitFunc) *staging {
 	return &staging{
-		runID: runID, scope: scope, task: task, elements: elements, labels: labels, txns: txns, emit: emit,
+		runID: runID, scope: scope, task: task, elements: elements, labels: labels, txns: txns, images: images, emit: emit,
 		plan: &Plan{}, created: map[string]ActionKind{}, failedCalls: map[string]int{},
 	}
 }
@@ -577,6 +592,35 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 		s.finished, s.everFinished = true, true
 		return out("Asked. The run will pause for an answer.")
 
+	case toolLook:
+		if s.images == nil {
+			return fail("images cannot be viewed on this deployment")
+		}
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type != domain.TypeImage {
+			return fail("%s is a %s, not an image", el.ID, el.Type)
+		}
+		if s.imagesSeen >= maxImagesPerRun {
+			return fail("that is enough images for one run (%d); work from what you have seen", maxImagesPerRun)
+		}
+		attachmentID, _ := el.Content["attachmentId"].(string)
+		if attachmentID == "" {
+			return fail("that image has no file attached yet")
+		}
+		data, mediaType, err := s.images.Fetch(ctx, attachmentID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		s.imagesSeen++
+		// The bytes ride on the NEXT user turn rather than in this outcome:
+		// a tool result is text, and an image is not.
+		s.pendingImages = append(s.pendingImages, cognition.ImagePart{MediaType: mediaType, Data: data})
+		return out(fmt.Sprintf("Attached %s — it is included with this turn, so describe what you see and use it.",
+			truncate(sanitizeName(contentStr(el.Content, "filename")), 60)))
+
 	case toolTree:
 		tree, elided, err := s.renderTree(ctx, s.scope.Board.ID, 0)
 		if err != nil {
@@ -591,6 +635,29 @@ func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognitio
 			tree += fmt.Sprintf("(%d board(s) not expanded — this is as deep as the outline goes)", elided)
 		}
 		return out(tree)
+
+	case toolComment:
+		if s.commented {
+			return fail("you have already left a note; put anything else in your summary")
+		}
+		text := sanitizeBody(in.Text)
+		if text == "" {
+			return fail("that comment has no text")
+		}
+		id, err := s.add(Action{
+			Kind: ActComment, ParentID: s.scope.Board.ID, Section: string(domain.SectionCanvas),
+			Text: truncate(text, 500), Summary: truncate(text, 60),
+		})
+		if err != nil {
+			return fail("%v", err)
+		}
+		s.commented = true
+		// The thread element is staged; its body is written at apply time, so a
+		// discarded preview leaves no orphan thread.
+		s.plan.NewComments = append(s.plan.NewComments, &domain.Comment{
+			ThreadID: id, AuthorID: s.task.Owner, Body: truncate(text, 500),
+		})
+		return out("Staged a note on the board.")
 
 	case toolClone:
 		src, err := s.resolveExisting(in.SourceID)

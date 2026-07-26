@@ -52,13 +52,17 @@ const (
 	// A clone shows one card in two places and stays in sync. Only reachable
 	// now that the clone read path authorizes its sources (GAPS_AUDIT §0).
 	ActCloneHere ActionKind = "clone_here"
+	// A note to the reader, left where the work is. Everything the agent knows
+	// otherwise dies with the run panel: a month later the board cannot say why
+	// it is shaped the way it is.
+	ActComment ActionKind = "comment"
 )
 
 // Creates reports whether the action brings a new element into being.
 func (k ActionKind) Creates() bool {
 	switch k {
 	case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink,
-		ActConnect, ActCreateTable, ActCloneHere:
+		ActConnect, ActCreateTable, ActCloneHere, ActComment:
 		return true
 	}
 	return false
@@ -83,6 +87,8 @@ func (k ActionKind) ElementType() domain.ElementType {
 		return domain.TypeTable
 	case ActCloneHere:
 		return domain.TypeClone
+	case ActComment:
+		return domain.TypeCommentThread
 	}
 	return domain.TypeUnknown
 }
@@ -154,6 +160,10 @@ type Plan struct {
 	// the ops, never while planning: a preview that is discarded must leave the
 	// user's taxonomy exactly as it found it.
 	NewLabels []*domain.Label `bson:"newLabels,omitempty" json:"newLabels,omitempty"`
+	// NewComments are the bodies for any comment threads this plan creates.
+	// Like labels, they are written at APPLY time only, so a discarded preview
+	// leaves no orphan threads behind.
+	NewComments []*domain.Comment `bson:"newComments,omitempty" json:"newComments,omitempty"`
 	// Quarantined marks a plan produced by a run that board content tried to
 	// steer. It can still be applied — by a person, deliberately — but never
 	// unattended, whatever the autonomy setting says.
@@ -216,7 +226,8 @@ func CompileOps(p *Plan, scope *BoardScope) ([]domain.Op, error) {
 
 	for _, a := range p.Actions {
 		switch a.Kind {
-		case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink:
+		case ActCreateBoard, ActCreateColumn, ActCreateNote, ActCreateTodo, ActCreateLink,
+			ActCreateTable, ActConnect, ActCloneHere, ActComment:
 			ops = append(ops, createOp(a))
 			if a.Kind == ActCreateTodo {
 				// A to-do list is a container; its items are TASK children,
@@ -394,9 +405,15 @@ func createOp(a Action) domain.Op {
 		content["endArrow"] = true
 	case ActCreateTable:
 		content["title"] = a.Title
-		content["rows"] = a.Rows
+		// The renderer reads content.cells (TableCard.tsx). Writing anything
+		// else produces a table that exists and shows nothing.
+		content["cells"] = a.Rows
 	case ActCloneHere:
 		content["cloneSourceId"] = a.FromID
+	case ActComment:
+		// The thread element carries no body; the comment itself lives in the
+		// comment collection, keyed by this element's id.
+		content["resolved"] = false
 	}
 
 	return domain.Op{

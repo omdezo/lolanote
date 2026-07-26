@@ -53,6 +53,16 @@ const (
 	RoleAssistant = "assistant"
 )
 
+// ImagePart is one image attached to a turn.
+//
+// Images are carried as bytes rather than URLs: the provider must not be handed
+// a link into this deployment's storage, and a signed URL would expire between
+// staging and the retry that follows a transient failure.
+type ImagePart struct {
+	MediaType string // "image/png", "image/jpeg", "image/webp", "image/gif"
+	Data      []byte
+}
+
 // Message is one turn of the conversation.
 type Message struct {
 	Role string
@@ -61,6 +71,10 @@ type Message struct {
 	// them. A turn carries one or the other, never both.
 	Calls    []ToolCall
 	Outcomes []ToolOutcome
+	// Images ride on a user turn, attached only when the run explicitly asked
+	// to look at something. Never by default: a board of forty screenshots
+	// would exhaust the context and the budget in one turn.
+	Images []ImagePart
 }
 
 // Request is one inference call.

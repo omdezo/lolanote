@@ -1,12 +1,15 @@
 package agent_test
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
 	"qomranote/backend/internal/agent"
 	"qomranote/backend/internal/domain"
+	"qomranote/backend/internal/repository/memory"
 )
 
 // Structural evals.
@@ -381,5 +384,106 @@ func TestDigest_CarriesLabelsAndColours(t *testing.T) {
 	// same names are what set_color accepts.
 	if !strings.Contains(out, "◧yellow") {
 		t.Errorf("colour missing or not named:\n%s", out)
+	}
+}
+
+// Compiled ops must use the exact content keys the renderer reads. This class
+// of bug is invisible to every other test: the element is created, the
+// transaction commits, the run reports success, and the card renders empty.
+// A table written under "rows" instead of "cells" did exactly that.
+func TestCompile_UsesTheContentKeysTheClientReads(t *testing.T) {
+	const board = "b000000000000000000000cc"
+	scope := &agent.BoardScope{
+		Board:    &domain.Element{ID: board, Type: domain.TypeBoard},
+		Elements: map[string]*domain.Element{},
+		Occupied: agent.Rect{Empty: true},
+	}
+	plan := &agent.Plan{Actions: []agent.Action{
+		{Seq: 0, Kind: agent.ActCreateColumn, ElementID: "e0", ParentID: board, Title: "Pricing"},
+		{Seq: 1, Kind: agent.ActCreateNote, ElementID: "e1", ParentID: board, Text: "a note"},
+		{Seq: 2, Kind: agent.ActCreateLink, ElementID: "e2", ParentID: board, URL: "https://x.test", Title: "X"},
+		{Seq: 3, Kind: agent.ActCreateTable, ElementID: "e3", ParentID: board,
+			Rows: [][]string{{"Tier", "Price"}, {"Team", "$10"}}},
+		{Seq: 4, Kind: agent.ActConnect, ElementID: "e4", ParentID: board, FromID: "e1", ToID: "e2"},
+		{Seq: 5, Kind: agent.ActCloneHere, ElementID: "e5", ParentID: board, FromID: "e1"},
+	}}
+	ops, err := agent.CompileOps(plan, scope)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	// Keys the client actually reads, per the element components.
+	want := map[string][]string{
+		"e0": {"title"},              // ColumnCard
+		"e1": {"textPreview", "doc"}, // NoteCard
+		"e2": {"url"},                // LinkCard
+		"e3": {"cells"},              // TableCard.tsx:19
+		"e4": {"fromId", "toId"},     // LineLayer
+		"e5": {"cloneSourceId"},      // clone resolution in board_service
+	}
+	byID := map[string]domain.Content{}
+	for _, op := range ops {
+		if op.Action == domain.ActionCreate {
+			c, _ := op.Changes["content"].(map[string]any)
+			byID[op.ElementID] = domain.Content(c)
+		}
+	}
+	for id, keys := range want {
+		content, ok := byID[id]
+		if !ok {
+			t.Errorf("%s produced no create op", id)
+			continue
+		}
+		for _, k := range keys {
+			if _, present := content[k]; !present {
+				t.Errorf("%s content is missing %q — the client reads that key (got %v)",
+					id, k, keysOf(content))
+			}
+		}
+	}
+}
+
+func keysOf(c domain.Content) []string {
+	out := make([]string, 0, len(c))
+	for k := range c {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// P5: images are attached on demand and bounded. The failure that matters is
+// not "cannot see" — it is a board of forty screenshots silently exhausting a
+// run's context and budget in one turn.
+func TestVision_RefusesWhatItCannotOrShouldNotShow(t *testing.T) {
+	att := memory.NewAttachmentRepo()
+	ctx := context.Background()
+	seed := func(id, ctype string, size int64, url string) {
+		if err := att.Insert(ctx, &domain.Attachment{
+			ID: id, OwnerID: "alice", ContentType: ctype, Size: size,
+			PublicURL: url, Filename: id + ".bin", Status: domain.AttachmentUploaded,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed("a-pdf", "application/pdf", 100, "http://example.test/x")
+	seed("a-huge", "image/png", 50<<20, "http://example.test/x")
+	seed("a-pending", "image/png", 100, "")
+
+	f := agent.NewHTTPImageFetcher(att)
+	for _, c := range []struct{ id, want string }{
+		{"a-pdf", "cannot be viewed"},
+		{"a-huge", "too large"},
+		{"a-pending", "not finished uploading"},
+		{"a-missing", "could not be found"},
+	} {
+		_, _, err := f.Fetch(ctx, c.id)
+		if err == nil {
+			t.Errorf("%s was fetched; it should have been refused", c.id)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error %q does not explain the refusal (want %q)", c.id, err, c.want)
+		}
 	}
 }

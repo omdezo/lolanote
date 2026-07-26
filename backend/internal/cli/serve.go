@@ -137,7 +137,8 @@ var serveCmd = &cobra.Command{
 			provider = cognition.NewFallback(provider)
 			agentSvc = agent.NewService(agent.Config{
 				Elements: elements, Users: users,
-				Txns: txnSvc, TxnRepo: transactions, Access: access, Labels: labels,
+				Txns: txnSvc, TxnRepo: transactions, Access: access, Labels: labels, Comments: comments,
+				Images:   agent.NewHTTPImageFetcher(attachments),
 				Runs:     repo.NewAgentRunRepo(store),
 				Events:   repo.NewAgentEventRepo(store),
 				Provider: provider, Bus: hub,

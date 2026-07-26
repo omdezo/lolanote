@@ -2,6 +2,7 @@ package cognition
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -143,6 +144,10 @@ func anthropicMessages(msgs []Message) []anthropic.MessageParam {
 		// parallel.
 		for _, r := range m.Outcomes {
 			blocks = append(blocks, anthropic.NewToolResultBlock(r.CallID, r.Content, r.IsError))
+		}
+		for _, img := range m.Images {
+			blocks = append(blocks, anthropic.NewImageBlockBase64(
+				img.MediaType, base64.StdEncoding.EncodeToString(img.Data)))
 		}
 		if len(blocks) == 0 {
 			continue

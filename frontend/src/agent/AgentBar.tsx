@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useBoard } from '../store/boardStore';
+import { prompt } from '../components/ui/Prompt';
 import { useView } from '../store/viewStore';
 import { CloseIcon, ShieldIcon, SparkleIcon } from '../components/Icons';
 import type { AgentAction, AgentAutonomy, AgentEvent, AgentRun, AgentScope } from '../api/types';
@@ -128,6 +129,27 @@ function Ask() {
   // when nothing is selected, so the chip never cycles through a dead option.
   const scopes: AgentScope[] = ['board', 'unsorted', ...(counts.selection > 0 ? ['selection' as const] : [])];
   const cycleScope = () => setScope(scopes[(scopes.indexOf(scope) + 1) % scopes.length]);
+
+  const board = boardId ? elements[boardId] : undefined;
+  const rules = (board?.content?.agentInstructions as string | undefined) ?? '';
+  const editRules = async () => {
+    const next = await prompt({
+      title: 'How this board works',
+      placeholder: 'e.g. Columns are pipeline stages — never add one. Tag by owner.',
+      defaultValue: rules,
+      confirmLabel: 'Save',
+      multiline: true,
+    });
+    if (next === null || !boardId || next === rules) return;
+    // Through the ordinary transaction path, so it is undoable and syncs like
+    // any other edit rather than being agent-only state.
+    void useBoard.getState().commitTransaction([{
+      elementId: boardId,
+      action: 'update',
+      changes: { content: { agentInstructions: next } },
+      undoChanges: { content: { agentInstructions: rules } },
+    }]);
+  };
   const revertible = recent.filter((r) => r.state === 'COMPLETED');
 
   return (
@@ -210,7 +232,13 @@ function Ask() {
           {autonomy === 'preview' ? 'Preview' : 'Auto-apply'}
         </button>
         <span className="ac-spacer" />
-        <span className="ac-hint"><kbd>↵</kbd> to send</span>
+        {/* Board conventions the agent should always honour. Author-written:
+            rules it inferred for itself would be invisible and could not be
+            argued with. */}
+        <button className="ac-chip" onClick={editRules}
+          title="Standing notes Qomra should follow on this board">
+          {rules ? 'Rules ✓' : 'Rules'}
+        </button>
       </div>
     </div>
   );
