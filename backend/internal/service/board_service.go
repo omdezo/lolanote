@@ -114,7 +114,21 @@ func (s *BoardService) Children(ctx context.Context, p *domain.Principal, boardI
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, sources...)
+		// A CLONE names its source by id, and the write path lets anyone put a
+		// CLONE on their OWN board pointing at ANY element — it only checks the
+		// clone's parent. So resolving those ids unchecked turns this read into
+		// a cross-tenant disclosure: forge a clone, read the victim's card.
+		//
+		// Every source is therefore authorised on its own merits, against the
+		// board it actually lives under, not the board being rendered. Sources
+		// the caller cannot view are dropped rather than erroring: a clone
+		// whose source was un-shared is a normal state, not a failed request.
+		for _, src := range sources {
+			if _, _, err := s.access.RequireView(ctx, src.ID, p); err != nil {
+				continue
+			}
+			out = append(out, src)
+		}
 	}
 	return out, nil
 }
