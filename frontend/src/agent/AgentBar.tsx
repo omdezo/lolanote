@@ -11,6 +11,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useBoard } from '../store/boardStore';
+import { uploadFile } from '../api/client';
+import { toast } from '../components/ui/Toaster';
 import { prompt } from '../components/ui/Prompt';
 import { useView } from '../store/viewStore';
 import { CloseIcon, ShieldIcon, SparkleIcon } from '../components/Icons';
@@ -120,6 +122,9 @@ function Ask() {
   const audit = useAgent((s) => s.audit);
   const { boardId, elements, selection } = useBoard();
   const [intent, setIntent] = useState('');
+  const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [autonomy, setAutonomy] = useState<AgentAutonomy>('preview');
   const [scope, setScope] = useState<AgentScope>('board');
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -145,13 +150,37 @@ function Ask() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = () => {
-    if (!intent.trim()) return;
+    if (!intent.trim() || uploading) return;
     lastIntent = intent.trim();
     void useAgent.getState().start({
       intent, scope, autonomy,
       selectionIds: scope === 'selection' ? Array.from(selection) : undefined,
+      attachmentIds: files.map((f) => f.id),
     });
     setIntent('');
+    setFiles([]);
+  };
+
+  /**
+   * Files attached to the REQUEST, as opposed to something already on the
+   * board. Uploaded immediately through the ordinary presign pipeline, so by
+   * the time the run starts the server has them and only needs their ids.
+   */
+  const attach = async (list: FileList | File[]) => {
+    const picked = Array.from(list).slice(0, 4 - files.length);
+    if (picked.length === 0) return;
+    setUploading(true);
+    try {
+      const done = await Promise.all(picked.map(async (f) => {
+        const { attachmentId } = await uploadFile(f);
+        return { id: attachmentId, name: f.name };
+      }));
+      setFiles((prev) => [...prev, ...done].slice(0, 4));
+    } catch {
+      toast.error('That file could not be attached.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   // Only the scopes that mean something right now: "selection" is not offered
@@ -222,6 +251,21 @@ function Ask() {
         </div>
       )}
 
+      {/* Attached files, before the field, so it is obvious they are part of
+          the request rather than something the agent found. */}
+      {files.length > 0 && (
+        <div className="ac-files">
+          {files.map((f) => (
+            <span key={f.id} className="ac-file">
+              {f.name}
+              <button title="Remove" onClick={() => setFiles((p) => p.filter((x) => x.id !== f.id))}>
+                <CloseIcon size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="ac-inputrow">
         <SparkleIcon size={16} />
         <textarea
@@ -237,6 +281,14 @@ function Ask() {
             e.target.style.height = 'auto';
             e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
           }}
+          onPaste={(e) => {
+            const f = Array.from(e.clipboardData.files);
+            if (f.length) { e.preventDefault(); void attach(f); }
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length) { e.preventDefault(); void attach(e.dataTransfer.files); }
+          }}
+          onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); }
             if (e.key === 'ArrowUp' && !intent && lastIntent) { e.preventDefault(); setIntent(lastIntent); }
@@ -245,6 +297,13 @@ function Ask() {
         {/* The arrow is compact, but on its own it never says what pressing it
             does. The label carries the outcome of the current mode, so the
             promise is legible before the click, not after. */}
+        <input ref={fileRef} type="file" multiple hidden
+          accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+          onChange={(e) => { void attach(e.target.files ?? []); e.target.value = ''; }} />
+        <button className="ac-clip" title="Attach an image or PDF to this request"
+          disabled={uploading || files.length >= 4} onClick={() => fileRef.current?.click()}>
+          {uploading ? '…' : '+'}
+        </button>
         <button
           className="ac-send"
           disabled={busy || !intent.trim()}

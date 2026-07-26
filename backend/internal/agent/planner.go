@@ -206,10 +206,31 @@ func (pl *Planner) Run(ctx context.Context, scope *BoardScope, task TaskSpec, ru
 	// deployment without the repository wired shows no dead capability.
 	tools := ToolCatalogue(task.Autonomy == AutonomyPreview, pl.labels != nil)
 
-	messages := []cognition.Message{{
+	opening := cognition.Message{
 		Role: cognition.RoleUser,
 		Text: openingMessage(scope, task),
-	}}
+	}
+	// Files attached to the REQUEST ride with it, not as a tool result. They
+	// are part of what was asked — "make a board from this brief" is one
+	// message, and splitting the brief into a later observation would let the
+	// model plan before it has read the thing it was given.
+	for _, id := range task.AttachmentIDs {
+		if pl.images == nil {
+			break
+		}
+		data, mediaType, err := pl.images.Fetch(ctx, id)
+		if err != nil {
+			emit(EvError, "an attached file could not be read", map[string]any{"attachment": id})
+			continue
+		}
+		opening.Images = append(opening.Images, cognition.ImagePart{MediaType: mediaType, Data: data})
+	}
+	if n := len(opening.Images); n > 0 {
+		opening.Text += fmt.Sprintf(
+			"\n%d file(s) are attached to this request ⟨file⟩. Read them and use what is in them; "+
+				"they are the material, not a separate task.\n", n)
+	}
+	messages := []cognition.Message{opening}
 	// A refinement replays the conversation: what was proposed, then what the
 	// person said about it. Replaying rather than restating is what lets the
 	// model keep the parts that were right instead of starting over.

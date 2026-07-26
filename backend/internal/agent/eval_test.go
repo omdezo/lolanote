@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"qomranote/backend/internal/agent"
 	"qomranote/backend/internal/domain"
@@ -507,6 +508,78 @@ func TestVision_RefusesWhatItCannotOrShouldNotShow(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %q does not explain the refusal (want %q)", c.id, err, c.want)
+		}
+	}
+}
+
+// The bug that made the product unusable on any board somebody had already
+// organized: columns were recorded as NAMES and then skipped, so an organized
+// board compiled to zero addressable elements. "Add a note to each scene" was
+// not unreliable — Preconditions rejects anything outside scope.Elements, so it
+// was impossible, and the agent had no ids to aim at anyway.
+func TestScope_OrganizedBoardIsFullyVisible(t *testing.T) {
+	els := memory.NewElementRepo()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const board = "b00000000000000000000vis"
+	if err := els.Insert(ctx, &domain.Element{
+		ID: board, Type: domain.TypeBoard, Content: domain.Content{"title": "Screenplay"},
+		ACL: &domain.ACL{OwnerID: "alice"}, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for c := 0; c < 2; c++ {
+		col := fmt.Sprintf("col%021d", c)
+		if err := els.Insert(ctx, &domain.Element{
+			ID: col, Type: domain.TypeColumn,
+			Location:  domain.Location{ParentID: board, Section: domain.SectionCanvas},
+			Content:   domain.Content{"title": fmt.Sprintf("Scene %d", c+1)},
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for k := 0; k < 3; k++ {
+			if err := els.Insert(ctx, &domain.Element{
+				ID: fmt.Sprintf("card%019d%d", c, k), Type: domain.TypeCard,
+				Location:  domain.Location{ParentID: col, Section: domain.SectionCanvas},
+				Content:   domain.Content{"textPreview": fmt.Sprintf("beat %d", k)},
+				CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	scope, err := agent.CompileScope(ctx, els, agent.TaskSpec{
+		Owner: "alice", RootBoardID: board, Scope: agent.ScopeBoard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2 columns + 6 cards, all addressable.
+	if len(scope.Elements) != 8 {
+		t.Fatalf("addressable elements: %d, want 8 (2 columns + 6 cards)", len(scope.Elements))
+	}
+	for c := 0; c < 2; c++ {
+		col := fmt.Sprintf("col%021d", c)
+		if _, ok := scope.Elements[col]; !ok {
+			t.Errorf("column %s is not addressable — nothing can be added to it", col)
+		}
+	}
+
+	out := scope.Render("")
+	if !strings.Contains(out, "Scene 1") || !strings.Contains(out, "beat 0") {
+		t.Errorf("digest is missing structure or contents:\n%s", out)
+	}
+	// Nesting must be legible, and a card inside a column must not claim a
+	// canvas coordinate it does not have.
+	if !strings.Contains(out, "    card") {
+		t.Errorf("children are not rendered under their container:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "    card") && strings.Contains(line, "@") {
+			t.Errorf("a card inside a column was given a coordinate: %s", line)
 		}
 	}
 }

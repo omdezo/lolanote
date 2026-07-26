@@ -36,7 +36,7 @@ interface AgentState {
   recent: AgentRun[];
 
   loadCapabilities(): Promise<void>;
-  start(opts: { intent: string; scope: AgentScope; autonomy: AgentAutonomy; selectionIds?: string[] }): Promise<void>;
+  start(opts: { intent: string; scope: AgentScope; autonomy: AgentAutonomy; selectionIds?: string[]; attachmentIds?: string[] }): Promise<void>;
   ingest(ev: AgentEvent & { state?: AgentRunState }): void;
   loadRecent(): Promise<void>;
   /** What the agent has actually changed on this board. */
@@ -91,12 +91,12 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
   },
 
-  async start({ intent, scope, autonomy, selectionIds }) {
+  async start({ intent, scope, autonomy, selectionIds, attachmentIds }) {
     const boardId = useBoard.getState().boardId;
     if (!boardId || !intent.trim()) return;
     set({ busy: true, events: [], adjustments: [], hoverSeq: null });
     try {
-      const run = await api.agentCreateRun({ boardId, intent: intent.trim(), scope, autonomy, selectionIds });
+      const run = await api.agentCreateRun({ boardId, intent: intent.trim(), scope, autonomy, selectionIds, attachmentIds });
       set({ run, busy: false });
     } catch (err) {
       set({ busy: false });

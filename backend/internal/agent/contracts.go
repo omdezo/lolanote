@@ -151,6 +151,11 @@ type TaskSpec struct {
 	// whole conversation rather than only the latest correction — "make it four
 	// columns" after "group by theme" means both, not just the last one.
 	Refinements []string `bson:"refinements,omitempty" json:"refinements,omitempty"`
+	// AttachmentIDs are files the person attached to the REQUEST itself — a
+	// brief, a screenshot, a spec. Distinct from look_at, which reads something
+	// already on the board: these are part of what was asked, so they ride with
+	// the opening message rather than being discovered mid-run.
+	AttachmentIDs []string `bson:"attachmentIds,omitempty" json:"attachmentIds,omitempty"`
 }
 
 // Budget bounds the run. These are the limits that actually bind a tool loop.

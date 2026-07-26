@@ -28,21 +28,22 @@ type IDGenerator func() string
 
 // Service is the agent harness.
 type Service struct {
-	elements domain.ElementRepository
-	users    domain.UserRepository
-	txns     *service.TransactionService
-	txnRepo  domain.TransactionRepository
-	access   *service.AccessResolver
-	labels   domain.LabelRepository
-	comments domain.CommentRepository
-	images   ImageFetcher
-	links    LinkResolver
-	runs     RunStore
-	events   EventStore
-	provider cognition.Provider
-	bus      domain.EventBroadcaster
-	newID    IDGenerator
-	log      *zap.Logger
+	elements    domain.ElementRepository
+	users       domain.UserRepository
+	txns        *service.TransactionService
+	txnRepo     domain.TransactionRepository
+	access      *service.AccessResolver
+	labels      domain.LabelRepository
+	comments    domain.CommentRepository
+	images      ImageFetcher
+	attachments domain.AttachmentRepository
+	links       LinkResolver
+	runs        RunStore
+	events      EventStore
+	provider    cognition.Provider
+	bus         domain.EventBroadcaster
+	newID       IDGenerator
+	log         *zap.Logger
 
 	// dailyCapUSD bounds one tenant's spend per UTC day. Denial-of-wallet is a
 	// named threat, not an afterthought.
@@ -59,6 +60,7 @@ type Config struct {
 	Labels      domain.LabelRepository
 	Comments    domain.CommentRepository
 	Images      ImageFetcher
+	Attachments domain.AttachmentRepository
 	Links       LinkResolver
 	Runs        RunStore
 	Events      EventStore
@@ -78,6 +80,7 @@ func NewService(cfg Config) *Service {
 		labels:      cfg.Labels,
 		comments:    cfg.Comments,
 		images:      cfg.Images,
+		attachments: cfg.Attachments,
 		links:       cfg.Links,
 		users:       cfg.Users,
 		txns:        cfg.Txns,
@@ -110,6 +113,10 @@ type CreateRequest struct {
 	Scope       Scope    `json:"scope"`
 	SelectionID []string `json:"selectionIds,omitempty"`
 	Autonomy    Autonomy `json:"autonomy"`
+	// AttachmentIDs are files attached to this request. Uploaded through the
+	// ordinary presign flow first, so by the time they arrive here they are
+	// already the user's own, already stored, and already typed.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 // Create admits a task and starts the run. It returns as soon as the run is
@@ -169,8 +176,12 @@ func (s *Service) Create(ctx context.Context, p *domain.Principal, req CreateReq
 			RootBoardID: req.BoardID,
 			Scope:       req.Scope,
 			SelectionID: req.SelectionID,
-			Autonomy:    req.Autonomy,
-			Budget:      budget,
+			// Filtered to what this person actually owns and finished
+			// uploading: an attachment id is a client-supplied string, and the
+			// agent must never reach anything its principal could not.
+			AttachmentIDs: s.ownedAttachments(ctx, p, req.AttachmentIDs),
+			Autonomy:      req.Autonomy,
+			Budget:        budget,
 		},
 		State:  StateCreated,
 		Active: true,
@@ -214,6 +225,32 @@ func (s *Service) Create(ctx context.Context, p *domain.Principal, req CreateReq
 	principal := &domain.Principal{Sub: p.Sub, Email: p.Email, Name: p.Name}
 	go s.execute(context.Background(), principal, run.ID)
 	return run, nil
+}
+
+// maxPromptAttachments bounds what one request can carry. A PDF costs roughly
+// 258 tokens a page, so this is a spend limit as much as a usability one.
+const maxPromptAttachments = 4
+
+// ownedAttachments keeps only files this person actually owns and has finished
+// uploading. Checked here rather than trusted from the request: an attachment id
+// is a client-supplied string, and the whole point of the delegation model is
+// that the agent never reaches anything its principal could not.
+func (s *Service) ownedAttachments(ctx context.Context, p *domain.Principal, ids []string) []string {
+	if s.attachments == nil || len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if len(out) >= maxPromptAttachments {
+			break
+		}
+		att, err := s.attachments.Get(ctx, id)
+		if err != nil || att.OwnerID != p.Sub || att.Status != domain.AttachmentUploaded {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 // checkDailyCap enforces the tenant's spend ceiling before any tokens are spent.

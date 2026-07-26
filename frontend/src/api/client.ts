@@ -137,7 +137,7 @@ export const api = {
   // Note what is absent: no call sends ops. The client asks for a run and
   // sends typed adjustments; the server decides what lands on the board.
   agentCapabilities: () => request<AgentCapabilities>('GET', '/agent/capabilities'),
-  agentCreateRun: (body: { boardId: string; intent: string; scope: AgentScope; selectionIds?: string[]; autonomy: AgentAutonomy }) =>
+  agentCreateRun: (body: { boardId: string; intent: string; scope: AgentScope; selectionIds?: string[]; autonomy: AgentAutonomy; attachmentIds?: string[] }) =>
     request<AgentRun>('POST', '/agent/runs', body),
   agentRun: (id: string) => request<AgentRun>('GET', `/agent/runs/${id}`),
   agentRuns: (boardId: string, limit = 10) =>

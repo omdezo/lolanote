@@ -29,6 +29,16 @@ import (
 // this is a truncation, not a parse.
 const maxItemText = 200
 
+// Nesting budget. A column's cards are the board's content, so they must be
+// read — but "read everything" is how a context blows up on a real workspace.
+// Both caps elide rather than truncate silently: what was left out is stated,
+// because an agent that cannot tell a short column from a clipped one will
+// confidently conclude things are missing.
+const (
+	maxNestedItems  = 120
+	maxPerContainer = 25
+)
+
 // Trust labels mark the provenance of every segment. Nothing enters the context
 // unlabelled.
 const (
@@ -48,13 +58,16 @@ type Item struct {
 	// Cell is a coarse grid reference like "B2" for canvas elements, or "" for
 	// anything in the tray. Buckets rather than pixels: spatial relationships
 	// survive, false precision does not, and the token cost is two characters.
-	Cell    string
-	ID      string
-	Type    domain.ElementType
-	Text    string
-	Trust   string
-	Labels  []string
-	Section domain.Section
+	Cell string
+	// ParentID is set for items inside a container, so the digest can render
+	// structure rather than a flat list that loses where everything lives.
+	ParentID string
+	ID       string
+	Type     domain.ElementType
+	Text     string
+	Trust    string
+	Labels   []string
+	Section  domain.Section
 }
 
 // Rect is an axis-aligned bounding box on the canvas.
@@ -87,6 +100,10 @@ type BoardScope struct {
 	// somebody who actually has access. Without this the agent would either
 	// guess at a subject id or never assign anything.
 	People []PersonRef
+	// Elided counts what a container held but the budget left out, by container
+	// id — stated in the digest so the agent never mistakes the edge of the
+	// budget for the edge of the board.
+	Elided map[string]int
 	// Instructions is the board author's standing note about how this board
 	// works. Author-written only: rules the agent inferred for itself would be
 	// invisible, compound silently, and could not be argued with.
@@ -188,8 +205,10 @@ func CompileScope(ctx context.Context, elements domain.ElementRepository, task T
 		Board:        board,
 		Instructions: truncate(sanitizeBody(contentStr(board.Content, "agentInstructions")), 600),
 		Elements:     map[string]*domain.Element{},
+		Elided:       map[string]int{},
 		Occupied:     Rect{Empty: true},
 	}
+	var containers []*domain.Element
 
 	for _, el := range children {
 		if el.IsDeleted() {
@@ -200,10 +219,21 @@ func CompileScope(ctx context.Context, elements domain.ElementRepository, task T
 		if el.Location.Section == domain.SectionCanvas && el.Type != domain.TypeLine {
 			scope.Occupied = scope.Occupied.include(el)
 		}
+		// A column used to be recorded as a NAME and then skipped, which made an
+		// organized board invisible: no id to parent to, no contents, nothing
+		// addressable. "Add a note to each scene" was not merely unreliable —
+		// Preconditions rejects any action on an element outside this map, so it
+		// was impossible. A container is part of the board, so it belongs here.
 		if el.Type == domain.TypeColumn {
 			if title, _ := el.Content["title"].(string); title != "" {
 				scope.ExistingColumns = append(scope.ExistingColumns, title)
 			}
+			// Scope filters describe which LEAVES to work on. A container is
+			// structure — it stays visible either way, or the agent cannot see
+			// where the leaves would go.
+			scope.Elements[el.ID] = el
+			scope.Items = append(scope.Items, itemFor(el))
+			containers = append(containers, el)
 			continue
 		}
 		if !organizable[el.Type] {
@@ -225,6 +255,39 @@ func CompileScope(ctx context.Context, elements domain.ElementRepository, task T
 
 		scope.Elements[el.ID] = el
 		scope.Items = append(scope.Items, itemFor(el))
+	}
+
+	// One level INTO each container. A column's cards are not a sub-board the
+	// agent might optionally visit — they are the board's content, and reading
+	// only the top level left it describing a filing cabinet it had never
+	// opened. Budgeted, because "read everything" is how a context blows up on
+	// somebody's real workspace.
+	budget := maxNestedItems
+	for _, c := range containers {
+		kids, err := elements.Children(ctx, domain.ElementFilter{ParentID: c.ID})
+		if err != nil {
+			return nil, err
+		}
+		shown := 0
+		for _, k := range kids {
+			if k.IsDeleted() || !organizable[k.Type] {
+				continue
+			}
+			if budget <= 0 || shown >= maxPerContainer {
+				scope.Elided[c.ID]++
+				continue
+			}
+			scope.Elements[k.ID] = k
+			it := itemFor(k)
+			it.ParentID = c.ID
+			// A coordinate on something inside a column is meaningless: the
+			// column orders its children, and reporting a cell invites the
+			// agent to reason about a position it cannot set.
+			it.Cell = ""
+			scope.Items = append(scope.Items, it)
+			shown++
+			budget--
+		}
 	}
 
 	// Stable ordering makes the compiled context byte-identical for an
@@ -368,13 +431,22 @@ func (s *BoardScope) Render(hint string) string {
 	if regions := s.regions(); regions != "" {
 		fmt.Fprintf(&b, "LAYOUT: %s\n", regions)
 	}
-	b.WriteString("\nITEMS (id · type · ⟨trust⟩ · text)\n")
+	b.WriteString("\nITEMS (id · type · ⟨trust⟩ · text) — indented items are INSIDE the line above\n")
+	// Children render under their container rather than in one flat list, so
+	// the structure the person actually sees survives into the context. A flat
+	// list of the same ids reads as a pile and loses where anything lives.
+	byParent := map[string][]Item{}
 	for _, it := range s.Items {
+		if it.ParentID != "" {
+			byParent[it.ParentID] = append(byParent[it.ParentID], it)
+		}
+	}
+	render := func(it Item, indent string) {
 		text := it.Text
 		if text == "" {
 			text = "(no text)"
 		}
-		fmt.Fprintf(&b, "%s · %s · ⟨%s⟩ · %s", it.ID, it.Type, it.Trust, text)
+		fmt.Fprintf(&b, "%s%s · %s · ⟨%s⟩ · %s", indent, it.ID, it.Type, it.Trust, text)
 		// The axes the agent can now act on without moving anything.
 		if len(it.Labels) > 0 {
 			fmt.Fprintf(&b, "  ⚑%s", strings.Join(it.Labels, ","))
@@ -390,6 +462,22 @@ func (s *BoardScope) Render(hint string) string {
 		}
 		b.WriteString("\n")
 	}
+
+	for _, it := range s.Items {
+		if it.ParentID != "" {
+			continue // rendered under its container, below
+		}
+		render(it, "")
+		for _, kid := range byParent[it.ID] {
+			render(kid, "    ")
+		}
+		// Say what was left out. An agent that cannot tell a short column from
+		// a clipped one will confidently report things as missing.
+		if n := s.Elided[it.ID]; n > 0 {
+			fmt.Fprintf(&b, "    … and %d more not shown (budget)\n", n)
+		}
+	}
+
 	if hint != "" {
 		// The user's own steer is the only untrusted channel that legitimately
 		// carries intent, and it is still fenced and labelled rather than
