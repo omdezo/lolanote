@@ -24,7 +24,7 @@ architecture.`,
 
 // Execute runs the CLI.
 func Execute() error {
-	rootCmd.AddCommand(serveCmd, migrateCmd, seedCmd, versionCmd)
+	rootCmd.AddCommand(serveCmd, migrateCmd, seedCmd, versionCmd, agentCheckCmd)
 	return rootCmd.Execute()
 }
 

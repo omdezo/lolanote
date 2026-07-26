@@ -13,7 +13,7 @@ import (
 type Role int
 
 const (
-	RoleNone Role = iota
+	RoleNone     Role = iota
 	RoleView          // can see content
 	RoleFeedback      // view + comment/react/draw (read-only link with feedback, §6.1)
 	RoleEdit          // full editing

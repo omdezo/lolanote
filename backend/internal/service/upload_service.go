@@ -27,8 +27,8 @@ func NewUploadService(attachments domain.AttachmentRepository, presigner domain.
 
 // Plan-style limits (mirrors §4.8's table; generous "pro" defaults here).
 const (
-	maxImageSize = 100 << 20      // 100 MB
-	maxFileSize  = 5 << 30        // 5 GB
+	maxImageSize = 100 << 20 // 100 MB
+	maxFileSize  = 5 << 30   // 5 GB
 )
 
 // PresignResult is what the client needs to perform the upload.

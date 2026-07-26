@@ -108,7 +108,16 @@ type Principal struct {
 	// ExpiresAt is the verified token's expiry. Long-lived sessions built on
 	// one verification (WebSockets) must not outlive the credential.
 	ExpiresAt time.Time
+	// Delegation is non-nil only when the AI agent is acting on this
+	// principal's behalf. It ATTENUATES: ACL checks still key on Sub, and the
+	// write path additionally requires every op to satisfy the grant. Human
+	// requests carry nil here and behave exactly as before.
+	Delegation *Delegation
 }
+
+// IsAgent reports whether this principal is the AI harness acting under a grant
+// rather than a human at a keyboard.
+func (p *Principal) IsAgent() bool { return p != nil && p.Delegation != nil }
 
 // BreadcrumbEntry is one hop in the Home → … → current-board path (§3.2).
 type BreadcrumbEntry struct {

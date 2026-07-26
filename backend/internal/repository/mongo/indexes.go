@@ -30,6 +30,26 @@ func (s *Store) EnsureIndexes(ctx context.Context) error {
 		},
 		colTransactions: {
 			{Keys: bson.D{{Key: "boardId", Value: 1}, {Key: "createdAt", Value: -1}}},
+			// "What did the AI change on this board?" — and the lookup revert
+			// uses to replay a run's inverses.
+			{Keys: bson.D{{Key: "agentRunId", Value: 1}}, Options: options.Index().SetSparse(true)},
+		},
+		colAgentRuns: {
+			{Keys: bson.D{{Key: "tenantSub", Value: 1}, {Key: "createdAt", Value: -1}}},
+			{Keys: bson.D{{Key: "task.rootBoardId", Value: 1}, {Key: "createdAt", Value: -1}}},
+			// One live run per board, enforced by the database rather than by a
+			// check that a concurrent create could slip past.
+			{
+				Keys: bson.D{{Key: "task.rootBoardId", Value: 1}},
+				Options: options.Index().SetUnique(true).
+					SetPartialFilterExpression(bson.M{"active": true}),
+			},
+			{Keys: bson.D{{Key: "active", Value: 1}}},
+		},
+		colAgentEvents: {
+			// The journal is ordered and gap-free: this uniqueness is what makes
+			// a client's "events since N" cursor meaningful.
+			{Keys: bson.D{{Key: "runId", Value: 1}, {Key: "sequence", Value: 1}}, Options: options.Index().SetUnique(true)},
 		},
 		colUsers: {
 			{Keys: bson.D{{Key: "keycloakSub", Value: 1}}, Options: options.Index().SetUnique(true)},

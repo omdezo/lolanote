@@ -6,12 +6,12 @@ package domain
 // meaningful — DefaultSettings() is the single source of defaults and
 // Normalize() coerces any persisted/patched value back into the valid set.
 type UserSettings struct {
-	Appearance    AppearanceSettings    `bson:"appearance" json:"appearance"`
-	Preferences   PreferenceSettings    `bson:"preferences" json:"preferences"`
-	Localization  LocalizationSettings  `bson:"localization" json:"localization"`
-	Toolbar       ToolbarSettings       `bson:"toolbar" json:"toolbar"`
-	Notifications NotificationSettings  `bson:"notifications" json:"notifications"`
-	Privacy       PrivacySettings       `bson:"privacy" json:"privacy"`
+	Appearance    AppearanceSettings   `bson:"appearance" json:"appearance"`
+	Preferences   PreferenceSettings   `bson:"preferences" json:"preferences"`
+	Localization  LocalizationSettings `bson:"localization" json:"localization"`
+	Toolbar       ToolbarSettings      `bson:"toolbar" json:"toolbar"`
+	Notifications NotificationSettings `bson:"notifications" json:"notifications"`
+	Privacy       PrivacySettings      `bson:"privacy" json:"privacy"`
 }
 
 // AppearanceSettings controls the visual shell.

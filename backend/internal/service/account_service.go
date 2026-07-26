@@ -23,8 +23,19 @@ type AccountService struct {
 	attachments   domain.AttachmentRepository
 	notifications domain.NotificationRepository
 	accounts      domain.AccountManager // nil when the Keycloak admin client is not configured
+	purgers       []TenantPurger
 	log           *zap.Logger
 }
+
+// TenantPurger removes a user's data from a subsystem that owns its own
+// storage. Account deletion means ALL of the user's data, so any subsystem that
+// keeps its own collections registers here rather than being forgotten.
+type TenantPurger interface {
+	PurgeTenant(ctx context.Context, tenant string) error
+}
+
+// AttachPurger registers a subsystem to purge on account deletion.
+func (s *AccountService) AttachPurger(p TenantPurger) { s.purgers = append(s.purgers, p) }
 
 // NewAccountService constructs the service.
 func NewAccountService(
@@ -237,6 +248,11 @@ func (s *AccountService) DeleteAccount(ctx context.Context, p *domain.Principal)
 	}
 	if err := s.notifications.DeleteByUser(ctx, p.Sub); err != nil {
 		s.log.Warn("purge notifications", zap.Error(err))
+	}
+	for _, purger := range s.purgers {
+		if err := purger.PurgeTenant(ctx, p.Sub); err != nil {
+			s.log.Warn("purge subsystem data", zap.Error(err))
+		}
 	}
 	if err := s.users.Delete(ctx, p.Sub); err != nil {
 		return err

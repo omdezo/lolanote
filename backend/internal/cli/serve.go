@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"qomranote/backend/internal/agent"
+	"qomranote/backend/internal/agent/cognition"
 	"qomranote/backend/internal/auth"
 	"qomranote/backend/internal/domain"
 	"qomranote/backend/internal/realtime"
@@ -116,6 +118,55 @@ var serveCmd = &cobra.Command{
 		maintenanceSvc := service.NewMaintenanceService(elements, attachments, blobRemover, log)
 		go maintenanceSvc.Run(ctx, 6*time.Hour)
 
+		// ---- AI agent ----
+		// Opt-in per deployment: without a provider key the harness is nil and
+		// its routes report the feature as unavailable. Nothing else changes —
+		// the agent adds a caller to the existing write path, not a new one.
+		var agentSvc *agent.Service
+		if provider, perr := cognition.New(cognition.Options{
+			Provider:        cfg.AgentProvider,
+			Model:           cfg.AgentModel,
+			AnthropicAPIKey: cfg.AnthropicAPIKey,
+			GeminiAPIKey:    cfg.GeminiAPIKey,
+		}); perr != nil {
+			log.Info("AI agent disabled", zap.String("reason", perr.Error()))
+		} else {
+			// One 502 mid-run loses every staged action and the money already
+			// spent producing them. Retrying a call is far cheaper than redoing
+			// a run, so every provider is wrapped.
+			provider = cognition.NewFallback(provider)
+			agentSvc = agent.NewService(agent.Config{
+				Elements: elements, Users: users,
+				Txns: txnSvc, TxnRepo: transactions, Access: access, Labels: labels,
+				Runs:     repo.NewAgentRunRepo(store),
+				Events:   repo.NewAgentEventRepo(store),
+				Provider: provider, Bus: hub,
+				NewID: agent.IDGenerator(repo.NewID), Log: log,
+				DailyCapUSD: cfg.AgentDailyCapUSD,
+			})
+			accountSvc.AttachPurger(agentSvc)
+			// A crash can leave a run mid-flight. Resolve those on boot rather
+			// than leaving them holding their board's run slot forever.
+			agentSvc.Reconcile(ctx)
+			if cfg.AgentPriceInPer1M > 0 || cfg.AgentPriceOutPer1M > 0 {
+				cognition.RegisterPrice(provider.Model(), cognition.Price{
+					InputPer1M: cfg.AgentPriceInPer1M, OutputPer1M: cfg.AgentPriceOutPer1M,
+				})
+			}
+			// An unpriced model costs zero, so the daily cap never binds and the
+			// figure shown to the user is a confident nothing. Say so loudly at
+			// boot: silence here is indistinguishable from "spending is fine".
+			if !cognition.Priced(provider.Model()) {
+				log.Warn("agent model has no known price — cost reporting will read $0 and the daily cap CANNOT bind",
+					zap.String("model", provider.Model()),
+					zap.String("fix", "set AGENT_PRICE_INPUT_PER_1M and AGENT_PRICE_OUTPUT_PER_1M from your provider's pricing page"))
+			}
+			log.Info("AI agent enabled",
+				zap.String("model", provider.Model()),
+				zap.Bool("priced", cognition.Priced(provider.Model())),
+				zap.Float64("dailyCapUSD", cfg.AgentDailyCapUSD))
+		}
+
 		// Readiness: Mongo ping + Keycloak discovery reachable.
 		readyCheck := func(rctx context.Context) error {
 			rctx, cancel := context.WithTimeout(rctx, 3*time.Second)
@@ -140,7 +191,7 @@ var serveCmd = &cobra.Command{
 			Users: userSvc, Account: accountSvc, Boards: boardSvc, Elements: elementSvc,
 			Txns: txnSvc, Share: shareSvc, Uploads: uploadSvc,
 			Links: linkSvc, Comments: commentSvc, Labels: labelSvc,
-			Notifications: notifications, Access: access,
+			Notifications: notifications, Agent: agentSvc, Access: access,
 			Hub: hub, Verifier: verifier, Tickets: tickets, Local: localDriver,
 			ReadyCheck: readyCheck, Log: log,
 		}

@@ -65,6 +65,11 @@ type ElementRepository interface {
 // TransactionRepository is the append-only mutation history.
 type TransactionRepository interface {
 	Insert(ctx context.Context, t *Transaction) error
+	// Get returns one transaction by id. Reversing a change means replaying the
+	// inverses recorded on the transaction itself, so the journal — not a
+	// second copy kept elsewhere — stays the single source of truth for what
+	// actually happened.
+	Get(ctx context.Context, id string) (*Transaction, error)
 	ListByBoard(ctx context.Context, boardID string, limit int) ([]*Transaction, error)
 }
 

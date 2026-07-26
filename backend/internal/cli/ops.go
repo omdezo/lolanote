@@ -112,8 +112,8 @@ var seedCmd = &cobra.Command{
 				continue
 			}
 			board := &domain.Element{
-				ID:   repo.NewID(),
-				Type: domain.TypeBoard,
+				ID:       repo.NewID(),
+				Type:     domain.TypeBoard,
 				Location: domain.Location{Section: domain.SectionCanvas},
 				Content: domain.Content{
 					"title": tpl.title, "isTemplate": true,
@@ -140,7 +140,7 @@ var seedCmd = &cobra.Command{
 						"doc": map[string]any{
 							"type": "doc",
 							"content": []any{map[string]any{
-								"type": "paragraph",
+								"type":    "paragraph",
 								"content": []any{map[string]any{"type": "text", "text": note}},
 							}},
 						},

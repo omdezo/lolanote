@@ -33,4 +33,19 @@ type Transaction struct {
 	ClientID  string    `bson:"clientId" json:"clientId"` // originating socket; excluded from echo
 	Ops       []Op      `bson:"ops" json:"ops"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+
+	// Origin distinguishes a human's edit from one the AI agent made on their
+	// behalf. Empty means human (every transaction written before the agent
+	// existed). Clients use it to label incoming broadcasts; the audit view
+	// uses it to answer "what did the AI change?".
+	Origin string `bson:"origin,omitempty" json:"origin,omitempty"`
+	// AgentRunID links every transaction a run committed back to that run, which
+	// is what makes a whole run revertible as one unit.
+	AgentRunID string `bson:"agentRunId,omitempty" json:"agentRunId,omitempty"`
 }
+
+// Transaction origins.
+const (
+	OriginHuman = "human"
+	OriginAgent = "agent"
+)

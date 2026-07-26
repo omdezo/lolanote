@@ -1,0 +1,829 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"qomranote/backend/internal/agent/cognition"
+	"qomranote/backend/internal/domain"
+)
+
+// The capability plane: the typed operations the model may ask for.
+//
+// The split that makes a general agent safe here is READ-LIVE / WRITE-STAGED.
+// Read tools run immediately — they are pure, so letting the model look around
+// mid-run costs nothing and is what allows it to build on what it just made.
+// Write tools are STAGED into a plan and executed later, all at once, as one
+// transaction. That preserves every property the narrow version had — preview
+// writes nothing, one Ctrl+Z, one revert — while removing the ceiling on what
+// the agent can propose.
+//
+// A staged create returns its real element id to the model, which is what lets
+// the next call parent to it.
+
+const (
+	toolReadBoard    = "read_board"
+	toolSearch       = "search"
+	toolCreateBoard  = "create_board"
+	toolCreateColumn = "create_column"
+	toolCreateNote   = "create_note"
+	toolCreateTodo   = "create_todo"
+	toolCreateLink   = "create_link"
+	toolMove         = "move_element"
+	toolRename       = "rename"
+	toolSetText      = "set_note_text"
+	toolDelete       = "delete_element"
+	toolApplyLabel   = "apply_label"
+	toolCreateLabel  = "create_label"
+	toolSetColor     = "set_color"
+	toolSetTask      = "set_task_done"
+	toolAsk          = "ask"
+	toolPreview      = "preview_layout"
+	toolFinish       = "finish"
+)
+
+// maxNewLabelsPerRun stops "tag everything" from spraying a taxonomy nobody
+// asked for. Reuse is nearly always the better answer.
+const maxNewLabelsPerRun = 4
+
+// maxToolOutputBytes bounds one observation. An unbounded read would let board
+// content crowd out the instructions.
+const maxToolOutputBytes = 6000
+
+// cardSwatches mirrors NOTE_COLORS in the frontend. The model picks a NAME and
+// the server resolves the hex: "#fff9db" means nothing to a language model, and
+// letting it choose free hex would put colours outside the product's palette on
+// the board.
+var cardSwatches = map[string]string{
+	"default": "",
+	"yellow":  "#fff9db",
+	"red":     "#ffe8e8",
+	"green":   "#e6fcf0",
+	"blue":    "#e7f5ff",
+	"purple":  "#f3f0ff",
+	"orange":  "#fff4e6",
+	"pink":    "#f8f0fc",
+	"dark":    "#2b3035",
+}
+
+func swatchNames() []string {
+	out := make([]string, 0, len(cardSwatches))
+	for name := range cardSwatches {
+		out = append(out, name)
+	}
+	sort.Strings(out) // stable order keeps the prompt cacheable
+	return out
+}
+
+func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+
+func obj(required []string, props map[string]any) map[string]any {
+	return map[string]any{"type": "object", "required": required, "properties": props}
+}
+
+// ToolCatalogue is the set offered to the model for a run. Deletes appear only
+// when the run is allowed to make them, so an unattended run cannot even see
+// the capability, let alone reach it.
+func ToolCatalogue(allowDelete, allowLabels bool) []cognition.ToolDef {
+	tools := []cognition.ToolDef{
+		{
+			Name: toolReadBoard,
+			Description: "Look inside a board to see what is already there. Call with no id for the board " +
+				"you are working on, or with the id of a board you created or found.",
+			Schema: obj(nil, map[string]any{"boardId": str("Board to inspect. Omit for the current board.")}),
+		},
+		{
+			Name: toolPreview,
+			Description: "See how what you have staged so far will actually be arranged on the canvas — " +
+				"widths, rows, and how many items land in each container. Call this before finish " +
+				"and fix anything that reads badly.",
+			Schema: obj(nil, map[string]any{}),
+		},
+		{
+			Name:        toolSearch,
+			Description: "Search the user's own boards and cards by text. Use before creating something that may already exist.",
+			Schema:      obj([]string{"query"}, map[string]any{"query": str("Words to look for.")}),
+		},
+		{
+			Name:        toolCreateBoard,
+			Description: "Create a nested board to hold related material. Boards are for whole topics; use a column for a list within a board.",
+			Schema: obj([]string{"parentId", "title"}, map[string]any{
+				"parentId": str("Board to create it inside."),
+				"title":    str("Board name, 24 characters or fewer — the tile clips longer ones."),
+			}),
+		},
+		{
+			Name:        toolCreateColumn,
+			Description: "Create a column: a vertical list on a board's canvas that holds cards.",
+			Schema: obj([]string{"parentId", "title"}, map[string]any{
+				"parentId": str("Board to create it on."),
+				// Word counts do not survive contact with a fixed-width header:
+				// "Scene 3: The Data Chip" is four words and still clips.
+				// Budget in characters, which is what actually fits.
+				"title": str("Column name, 20 characters or fewer — headers render uppercase and clip beyond that. " +
+					"Name the category, not the item: \"Data Chip\", not \"Scene 3: The Data Chip\"."),
+			}),
+		},
+		{
+			Name:        toolCreateNote,
+			Description: "Create a note card with text. This is the ordinary way to record something.",
+			Schema: obj([]string{"parentId", "text"}, map[string]any{
+				"parentId": str("Board or column to create it in."),
+				"text":     str("The note's content. Plain text; newlines make paragraphs."),
+				"section":  map[string]any{"type": "string", "enum": []string{"CANVAS", "UNSORTED"}, "description": "Where on the board. Defaults to the canvas."},
+			}),
+		},
+		{
+			Name:        toolCreateTodo,
+			Description: "Create a to-do list with its items.",
+			Schema: obj([]string{"parentId", "title", "tasks"}, map[string]any{
+				"parentId": str("Board or column to create it in."),
+				"title":    str("List name."),
+				"tasks":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One line per task."},
+			}),
+		},
+		{
+			Name:        toolCreateLink,
+			Description: "Create a link card pointing at a URL the user supplied. Do not invent URLs.",
+			Schema: obj([]string{"parentId", "url"}, map[string]any{
+				"parentId": str("Board or column to create it in."),
+				"url":      str("Full http(s) URL."),
+				"title":    str("Label for the link."),
+			}),
+		},
+		{
+			Name: toolMove,
+			Description: "Move an existing element into a board or column. " +
+				"Cards land in the ORDER YOU STAGE THEM, so stage them in the order they should be read — " +
+				"chronological, by priority, by sequence, whatever the material calls for.",
+			Schema: obj([]string{"elementId", "parentId"}, map[string]any{
+				"elementId": str("Element to move."),
+				"parentId":  str("Destination board or column."),
+				"section":   map[string]any{"type": "string", "enum": []string{"CANVAS", "UNSORTED"}, "description": "Defaults to the canvas."},
+				"because":   str("Optional. One short clause on why this belongs there — shown to the user when they review the plan."),
+			}),
+		},
+		{
+			Name:        toolRename,
+			Description: "Rename an existing board, column or list.",
+			Schema: obj([]string{"elementId", "title"}, map[string]any{
+				"elementId": str("Element to rename."), "title": str("New name."),
+			}),
+		},
+		{
+			Name:        toolSetText,
+			Description: "Replace the text of an existing note. Use only when the user asked for the content to change.",
+			Schema: obj([]string{"elementId", "text"}, map[string]any{
+				"elementId": str("Note to edit."), "text": str("New content."),
+			}),
+		},
+		{
+			Name: toolAsk,
+			Description: "Ask ONE clarifying question, and only before you have staged anything. " +
+				"Use it when the request genuinely has two sensible readings and guessing wrong " +
+				"would waste the whole run. Prefer attempting and being corrected: a question " +
+				"costs the person a round trip, so it must earn it.",
+			Schema: obj([]string{"question"}, map[string]any{
+				"question": str("One short question."),
+				"options": map[string]any{
+					"type": "array", "items": map[string]any{"type": "string"},
+					"description": "Two or three concrete answers to offer.",
+				},
+			}),
+		},
+		{
+			Name: toolFinish,
+			Description: "Finish. Call this when the work is planned, or immediately if nothing should be done. " +
+				"Say plainly what you are proposing and anything you deliberately left alone.",
+			Schema: obj([]string{"summary"}, map[string]any{
+				"summary": str("One or two sentences for the user."),
+			}),
+		},
+	}
+	if allowLabels {
+		tools = append(tools,
+			cognition.ToolDef{
+				Name: toolApplyLabel,
+				Description: "Tag an element with one of the user's existing labels. Labels cut ACROSS structure: " +
+					"use one when items belong together but should stay where they are. Prefer this to moving " +
+					"things when the user asks you to mark, flag or highlight.",
+				Schema: obj([]string{"elementId", "labelId"}, map[string]any{
+					"elementId": str("Element to tag."),
+					"labelId":   str("A label id from the LABELS list you were shown. Never invent one."),
+				}),
+			},
+			cognition.ToolDef{
+				Name: toolCreateLabel,
+				Description: "Create a new label, only when no existing one fits. Reuse before you coin: " +
+					"two labels meaning the same thing is worse than one imperfect one.",
+				Schema: obj([]string{"name"}, map[string]any{
+					"name": str("Short label name, 24 characters or fewer."),
+				}),
+			},
+		)
+	}
+	tools = append(tools,
+		cognition.ToolDef{
+			Name: toolSetColor,
+			Description: "Set a card's colour. A second grouping axis that survives re-filing. " +
+				"If you colour anything, say in your summary what the colours mean.",
+			Schema: obj([]string{"elementId", "color"}, map[string]any{
+				"elementId": str("Card to colour."),
+				"color": map[string]any{
+					"type": "string", "description": "One of the app's swatches.",
+					"enum": swatchNames(),
+				},
+			}),
+		},
+		cognition.ToolDef{
+			Name:        toolSetTask,
+			Description: "Tick or untick a task in a to-do list. Only when the user clearly asked for it — marking someone's work done is a claim about the world.",
+			Schema: obj([]string{"elementId", "done"}, map[string]any{
+				"elementId": str("Task to change."),
+				"done":      map[string]any{"type": "boolean", "description": "True to tick, false to untick."},
+			}),
+		},
+	)
+	if allowDelete {
+		tools = append(tools, cognition.ToolDef{
+			Name:        toolDelete,
+			Description: "Move an element to the trash. Only when the user clearly asked for removal.",
+			Schema: obj([]string{"elementId"}, map[string]any{
+				"elementId": str("Element to trash."),
+			}),
+		})
+	}
+	return tools
+}
+
+// staging accumulates the plan across the loop and enforces every rule the
+// model does not get to decide.
+type staging struct {
+	runID    string
+	scope    *BoardScope
+	task     TaskSpec
+	elements domain.ElementRepository
+	labels   domain.LabelRepository
+	emit     emitFunc
+
+	plan *Plan
+	// created maps a staged element id to its kind, so a later action can be
+	// checked for whether it is parenting to something that can hold children.
+	created map[string]ActionKind
+	// outOfScope counts ids the model named that it was never shown — the
+	// clearest signal of a successful injection.
+	outOfScope int
+	finished   bool
+	// reviewed records that the model has seen its own arrangement. The loop
+	// forces one look before accepting finish, so this is set either way.
+	reviewed  bool
+	newLabels int
+	// failedCalls counts identical failing calls, so a model looping on the
+	// same mistake can be told plainly rather than allowed to spend the whole
+	// budget rediscovering it.
+	failedCalls map[string]int
+	// asked and question hold the one clarifying question a run may pose.
+	asked    bool
+	question *Question
+	// everFinished stays true once the model has signalled it is done, even
+	// though the review turn un-sets `finished` to buy one more step. Without
+	// it, a run that completed and then reviewed would be reported as "may be
+	// incomplete" — the false warning this loop was fixed for once already.
+	everFinished bool
+}
+
+func newStaging(runID string, scope *BoardScope, task TaskSpec, elements domain.ElementRepository, labels domain.LabelRepository, emit emitFunc) *staging {
+	return &staging{
+		runID: runID, scope: scope, task: task, elements: elements, labels: labels, emit: emit,
+		plan: &Plan{}, created: map[string]ActionKind{}, failedCalls: map[string]int{},
+	}
+}
+
+// resolveParent validates a proposed parent and reports the section a child of
+// it should land in.
+func (s *staging) resolveParent(id string) (string, string, error) {
+	if id == "" || id == s.scope.Board.ID {
+		return s.scope.Board.ID, string(domain.SectionCanvas), nil
+	}
+	if kind, ok := s.created[id]; ok {
+		if !kind.Container() {
+			return "", "", fmt.Errorf("%s is a %s and cannot hold other items", id, kind.ElementType())
+		}
+		return id, string(domain.SectionCanvas), nil
+	}
+	el, ok := s.scope.Elements[id]
+	if !ok {
+		s.outOfScope++
+		return "", "", fmt.Errorf("there is no element %s on this board", id)
+	}
+	if !el.Type.IsContainer() {
+		return "", "", fmt.Errorf("%s is a %s and cannot hold other items", id, el.Type)
+	}
+	return id, string(domain.SectionCanvas), nil
+}
+
+// resolveExisting validates that an id refers to an element the run may touch.
+func (s *staging) resolveExisting(id string) (*domain.Element, error) {
+	el, ok := s.scope.Elements[id]
+	if !ok {
+		s.outOfScope++
+		return nil, fmt.Errorf("there is no element %s on this board", id)
+	}
+	if isHomeBoard(el) {
+		return nil, fmt.Errorf("the Home board cannot be changed")
+	}
+	return el, nil
+}
+
+// add appends a staged action, enforcing the plan's size budget.
+func (s *staging) add(a Action) (string, error) {
+	if len(s.plan.Actions) >= s.task.Budget.MaxActions {
+		return "", fmt.Errorf("this plan already has the maximum of %d changes; call finish", s.task.Budget.MaxActions)
+	}
+	a.Seq = len(s.plan.Actions)
+	if a.Kind.Creates() {
+		a.ElementID = ActionID(s.runID, a.Seq)
+		s.created[a.ElementID] = a.Kind
+	}
+	s.plan.Actions = append(s.plan.Actions, a)
+	// Announce it immediately. Watching the plan appear line by line is both
+	// better company than a spinner and more honest: the user sees the shape of
+	// the change forming, and can stop it before it is ever offered.
+	s.emit(EvActionStaged, a.Summary, map[string]any{
+		"seq": a.Seq, "kind": string(a.Kind), "elementId": a.ElementID,
+		"parentId": a.ParentID, "destructive": a.Kind.Destructive(),
+	})
+	return a.ElementID, nil
+}
+
+// Execute runs one tool call: reads answer immediately, writes stage.
+func (s *staging) Execute(ctx context.Context, call cognition.ToolCall) cognition.ToolOutcome {
+	out := func(msg string) cognition.ToolOutcome {
+		return cognition.ToolOutcome{CallID: call.ID, Name: call.Name, Content: truncate(msg, maxToolOutputBytes)}
+	}
+	fail := func(format string, args ...any) cognition.ToolOutcome {
+		msg := fmt.Sprintf(format, args...)
+		// A model that gets the same rejection twice will usually try a third
+		// time, identically, until the step budget runs out — the user waits
+		// and pays for a run that stopped progressing several turns ago.
+		// Escalating the wording is what breaks the loop: the same fact, said
+		// in a way that makes repeating the call visibly not an option.
+		key := call.Name + "|" + msg
+		s.failedCalls[key]++
+		switch n := s.failedCalls[key]; {
+		case n == 2:
+			msg += " — this is the second identical failure. Do not retry it; " +
+				"take a different approach or leave this part alone and say so."
+		case n > 2:
+			msg = "STOP repeating this call. It has failed " + fmt.Sprint(n) +
+				" times with: " + msg + ". Finish with what you have and explain what you could not do."
+		}
+		return cognition.ToolOutcome{CallID: call.ID, Name: call.Name, IsError: true,
+			Content: truncate(msg, 400)}
+	}
+
+	var in struct {
+		BoardID   string   `json:"boardId"`
+		Query     string   `json:"query"`
+		ParentID  string   `json:"parentId"`
+		ElementID string   `json:"elementId"`
+		Title     string   `json:"title"`
+		Text      string   `json:"text"`
+		URL       string   `json:"url"`
+		Section   string   `json:"section"`
+		Summary   string   `json:"summary"`
+		Tasks     []string `json:"tasks"`
+		LabelID   string   `json:"labelId"`
+		Name      string   `json:"name"`
+		Color     string   `json:"color"`
+		Done      bool     `json:"done"`
+		Because   string   `json:"because"`
+		Question  string   `json:"question"`
+		Options   []string `json:"options"`
+	}
+	if len(call.Input) > 0 {
+		if err := json.Unmarshal(call.Input, &in); err != nil {
+			return fail("could not read those arguments: %v", err)
+		}
+	}
+
+	switch call.Name {
+
+	case toolApplyLabel:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		label, err := s.resolveLabel(ctx, in.LabelID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if containsStr(el.LabelIDs, label.ID) {
+			return out(fmt.Sprintf("%s already carries %q.", el.ID, label.Name))
+		}
+		s.add(Action{
+			Kind: ActApplyLabel, ElementID: el.ID, LabelID: label.ID,
+			Summary: fmt.Sprintf("%s → %s", truncate(sanitizeText(textOf(el)), 40), label.Name),
+		})
+		return out(fmt.Sprintf("Staged: tag %s with %q.", el.ID, label.Name))
+
+	case toolCreateLabel:
+		if s.labels == nil {
+			return fail("labels are not available here")
+		}
+		name := sanitizeName(in.Name)
+		if name == "" || len([]rune(name)) > 24 {
+			return fail("a label needs a name of 24 characters or fewer")
+		}
+		// Reuse before coining: two labels meaning the same thing is a worse
+		// outcome than one imperfect one, and the model cannot see that from
+		// its own turn alone.
+		existing, err := s.ownedLabels(ctx)
+		if err != nil {
+			return fail("could not read labels")
+		}
+		for _, l := range existing {
+			if strings.EqualFold(l.Name, name) {
+				return out(fmt.Sprintf("%q already exists as %s — use that.", l.Name, l.ID))
+			}
+		}
+		if s.newLabels >= maxNewLabelsPerRun {
+			return fail("that is enough new labels for one run (%d); reuse one of the existing ones", maxNewLabelsPerRun)
+		}
+		l := &domain.Label{ID: s.nextLabelID(), OwnerID: s.task.Owner, Name: name, Color: "#5e5ce6"}
+		s.plan.NewLabels = append(s.plan.NewLabels, l)
+		s.newLabels++
+		return out(fmt.Sprintf("Created label %q as %s. Use that id with apply_label.", l.Name, l.ID))
+
+	case toolSetColor:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		hex, ok := cardSwatches[strings.ToLower(strings.TrimSpace(in.Color))]
+		if !ok {
+			return fail("%q is not one of the app's swatches (%s)", in.Color, strings.Join(swatchNames(), ", "))
+		}
+		s.add(Action{
+			Kind: ActSetColor, ElementID: el.ID, Color: hex,
+			Summary: fmt.Sprintf("%s → %s", truncate(sanitizeText(textOf(el)), 40), in.Color),
+		})
+		return out(fmt.Sprintf("Staged: colour %s %s.", el.ID, in.Color))
+
+	case toolSetTask:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type != domain.TypeTask {
+			return fail("%s is a %s, not a task", el.ID, el.Type)
+		}
+		verb := "tick"
+		if !in.Done {
+			verb = "untick"
+		}
+		s.add(Action{
+			Kind: ActSetTask, ElementID: el.ID, Done: in.Done,
+			Summary: fmt.Sprintf("%s %s", verb, truncate(sanitizeText(textOf(el)), 40)),
+		})
+		return out(fmt.Sprintf("Staged: %s %s.", verb, el.ID))
+
+	case toolAsk:
+		// Only before anything is staged, and only once. An agent that can ask
+		// twice will ask forever, and the bias must stay toward attempting.
+		if len(s.plan.Actions) > 0 {
+			return fail("you have already staged changes; finish the plan and let the person adjust it")
+		}
+		if s.asked {
+			return fail("you have already asked; make your best attempt and say what you assumed")
+		}
+		q := sanitizeName(in.Question)
+		if q == "" {
+			return fail("that needs a question")
+		}
+		s.asked = true
+		s.question = &Question{Text: truncate(q, 200)}
+		for _, o := range in.Options {
+			if clean := sanitizeName(o); clean != "" {
+				s.question.Options = append(s.question.Options, truncate(clean, 60))
+			}
+			if len(s.question.Options) == 3 {
+				break
+			}
+		}
+		s.finished, s.everFinished = true, true
+		return out("Asked. The run will pause for an answer.")
+
+	case toolPreview:
+		s.reviewed = true
+		view := RenderSelfView(s.plan, s.scope)
+		if view == "" {
+			return out("Nothing is placed on the canvas yet, so there is no arrangement to review.")
+		}
+		return out(view)
+
+	case toolFinish:
+		s.finished, s.everFinished = true, true
+		s.plan.Summary = truncate(sanitizeBody(in.Summary), 600)
+		return out("Finished.")
+
+	case toolReadBoard:
+		boardID := in.BoardID
+		if boardID == "" {
+			boardID = s.scope.Board.ID
+		}
+		// Containment: a board the agent may read is the run's root or
+		// something inside it. This is the same boundary the write path
+		// enforces, applied to reads so the agent cannot browse sideways.
+		if boardID != s.scope.Board.ID {
+			if _, ok := s.scope.Elements[boardID]; !ok {
+				if _, staged := s.created[boardID]; !staged {
+					s.outOfScope++
+					return fail("there is no board %s here", boardID)
+				}
+				return out("That board is part of this plan and is still empty.")
+			}
+		}
+		digest, err := s.readBoard(ctx, boardID)
+		if err != nil {
+			return fail("could not read that board: %v", err)
+		}
+		return out(digest)
+
+	case toolSearch:
+		q := strings.TrimSpace(in.Query)
+		if q == "" {
+			return fail("give me something to search for")
+		}
+		hits, err := s.elements.Search(ctx, s.task.Owner, q, 12)
+		if err != nil {
+			return fail("search failed")
+		}
+		if len(hits) == 0 {
+			return out(fmt.Sprintf("Nothing matches %q.", q))
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d matches for %q:\n", len(hits), q)
+		for _, el := range hits {
+			text, trust := textFor(el)
+			fmt.Fprintf(&b, "%s · %s · ⟨%s⟩ · %s\n", el.ID, el.Type, trust, truncate(sanitizeText(text), 90))
+		}
+		return out(b.String())
+
+	case toolCreateBoard, toolCreateColumn, toolCreateNote, toolCreateTodo, toolCreateLink:
+		parent, section, err := s.resolveParent(in.ParentID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if in.Section == string(domain.SectionUnsorted) && parent == s.scope.Board.ID {
+			section = string(domain.SectionUnsorted)
+		}
+		kind := map[string]ActionKind{
+			toolCreateBoard: ActCreateBoard, toolCreateColumn: ActCreateColumn,
+			toolCreateNote: ActCreateNote, toolCreateTodo: ActCreateTodo,
+			toolCreateLink: ActCreateLink,
+		}[call.Name]
+
+		a := Action{Kind: kind, ParentID: parent, Section: section}
+		switch kind {
+		case ActCreateBoard, ActCreateColumn:
+			a.Title = sanitizeName(in.Title)
+			if a.Title == "" {
+				return fail("that needs a title")
+			}
+			// A label the header clips is a label nobody can read. Reject it
+			// rather than truncate it: the model still holds the intent and can
+			// coin a shorter name, whereas a silent trim ships "SCENE 3: THE
+			// DATA CHI" to the user and calls it done.
+			if budget := labelBudget(kind); len([]rune(a.Title)) > budget {
+				return fail("%q is %d characters; the %s header shows about %d before it clips. "+
+					"Give it a shorter name — put the detail in a card, not the label.",
+					a.Title, len([]rune(a.Title)), a.Kind.ElementType(), budget)
+			}
+			a.Summary = a.Title
+		case ActCreateNote:
+			a.Text = sanitizeBody(in.Text)
+			if a.Text == "" {
+				return fail("that note has no text")
+			}
+			a.Summary = truncate(a.Text, 60)
+		case ActCreateTodo:
+			a.Title = sanitizeName(in.Title)
+			for _, t := range in.Tasks {
+				if clean := sanitizeName(t); clean != "" {
+					a.Tasks = append(a.Tasks, clean)
+				}
+			}
+			if a.Title == "" || len(a.Tasks) == 0 {
+				return fail("a to-do list needs a title and at least one task")
+			}
+			a.Summary = fmt.Sprintf("%s (%d tasks)", a.Title, len(a.Tasks))
+		case ActCreateLink:
+			a.URL = strings.TrimSpace(in.URL)
+			if !strings.HasPrefix(a.URL, "http://") && !strings.HasPrefix(a.URL, "https://") {
+				return fail("a link needs a full http(s) URL")
+			}
+			a.Title = sanitizeName(in.Title)
+			if a.Title == "" {
+				a.Title = a.URL
+			}
+			a.Summary = truncate(a.Title, 60)
+		}
+
+		id, err := s.add(a)
+		if err != nil {
+			return fail("%v", err)
+		}
+		return out(fmt.Sprintf("Staged. Its id is %s — use that as parentId to put things inside it.", id))
+
+	case toolMove:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type == domain.TypeLine {
+			return fail("connector lines follow the cards they join; they are not moved directly")
+		}
+		parent, section, err := s.resolveParent(in.ParentID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if parent == el.ID {
+			return fail("an element cannot be moved into itself")
+		}
+		if in.Section == string(domain.SectionUnsorted) && parent == s.scope.Board.ID {
+			section = string(domain.SectionUnsorted)
+		}
+		text, _ := textFor(el)
+		if _, err := s.add(Action{
+			Kind: ActMove, ElementID: el.ID, ParentID: parent, Section: section,
+			Summary: truncate(sanitizeText(text), 60),
+			Because: truncate(sanitizeName(in.Because), 80),
+		}); err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged.")
+
+	case toolRename:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		title := sanitizeName(in.Title)
+		if title == "" {
+			return fail("that needs a title")
+		}
+		if _, err := s.add(Action{
+			Kind: ActRename, ElementID: el.ID, Title: title,
+			Summary: title,
+		}); err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged.")
+
+	case toolSetText:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		if el.Type != domain.TypeCard && el.Type != domain.TypeDocument {
+			return fail("only notes and documents hold editable text")
+		}
+		text := sanitizeBody(in.Text)
+		if text == "" {
+			return fail("that would leave the note empty")
+		}
+		if _, err := s.add(Action{
+			Kind: ActSetText, ElementID: el.ID, Text: text,
+			Summary: truncate(text, 60),
+		}); err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged.")
+
+	case toolDelete:
+		el, err := s.resolveExisting(in.ElementID)
+		if err != nil {
+			return fail("%v", err)
+		}
+		text, _ := textFor(el)
+		if _, err := s.add(Action{
+			Kind: ActDelete, ElementID: el.ID,
+			Summary: truncate(sanitizeText(text), 60),
+		}); err != nil {
+			return fail("%v", err)
+		}
+		return out("Staged. The user must approve this before anything is trashed.")
+
+	default:
+		return fail("there is no tool called %q", call.Name)
+	}
+}
+
+// readBoard renders a board the agent asked to see, and folds what it found
+// into the scope so subsequent actions may legitimately reference it.
+func (s *staging) readBoard(ctx context.Context, boardID string) (string, error) {
+	board, err := s.elements.Get(ctx, boardID)
+	if err != nil {
+		return "", err
+	}
+	children, err := s.elements.Children(ctx, domain.ElementFilter{ParentID: boardID})
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	title, _ := board.Content["title"].(string)
+	fmt.Fprintf(&b, "BOARD %s %q — %d items\n", board.ID, title, len(children))
+	live := 0
+	for _, el := range children {
+		if el.IsDeleted() || el.Type == domain.TypeLine {
+			continue
+		}
+		live++
+		s.scope.Elements[el.ID] = el
+		text, trust := textFor(el)
+		fmt.Fprintf(&b, "%s · %s · ⟨%s⟩ · %s", el.ID, el.Type, trust, truncate(sanitizeText(text), 100))
+		if el.Location.Section == domain.SectionUnsorted {
+			b.WriteString("  [unsorted]")
+		}
+		b.WriteString("\n")
+	}
+	if live == 0 {
+		b.WriteString("(empty)\n")
+	}
+	return b.String(), nil
+}
+
+// sanitizeBody cleans model-authored prose that becomes card content. Newlines
+// survive because they carry meaning in a note; control characters do not.
+func sanitizeBody(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, sanitizeText(line))
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// ownedLabels lists the run owner's labels. Scoped to the owner for the same
+// reason element ids are scoped to the board: a shared board must not become a
+// way to enumerate somebody else's taxonomy.
+func (s *staging) ownedLabels(ctx context.Context) ([]*domain.Label, error) {
+	if s.labels == nil {
+		return nil, nil
+	}
+	return s.labels.ListByOwner(ctx, s.task.Owner)
+}
+
+// resolveLabel accepts only ids the run owner actually holds, including ones
+// coined earlier in this same run.
+func (s *staging) resolveLabel(ctx context.Context, id string) (*domain.Label, error) {
+	if s.labels == nil {
+		return nil, fmt.Errorf("labels are not available here")
+	}
+	for _, l := range s.plan.NewLabels {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	owned, err := s.ownedLabels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not read labels")
+	}
+	for _, l := range owned {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	// Same treatment as an out-of-scope element id: refused and counted, because
+	// a label id the model was never shown can only have come from content.
+	s.outOfScope++
+	return nil, fmt.Errorf("%s is not one of your labels", id)
+}
+
+func (s *staging) nextLabelID() string {
+	return ActionID(s.runID+":label", len(s.plan.NewLabels))
+}
+
+func containsStr(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// textOf is the human handle for an element in a summary line.
+func textOf(el *domain.Element) string {
+	if t, ok := el.Content["textPreview"].(string); ok && t != "" {
+		return t
+	}
+	if t, ok := el.Content["title"].(string); ok && t != "" {
+		return t
+	}
+	return el.ID
+}

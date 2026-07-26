@@ -27,6 +27,18 @@ func (r *TransactionRepo) Insert(ctx context.Context, t *domain.Transaction) err
 	return err
 }
 
+func (r *TransactionRepo) Get(ctx context.Context, id string) (*domain.Transaction, error) {
+	var t domain.Transaction
+	err := r.col.FindOne(ctx, bson.M{"_id": id}).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 func (r *TransactionRepo) ListByBoard(ctx context.Context, boardID string, limit int) ([]*domain.Transaction, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

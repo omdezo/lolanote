@@ -53,4 +53,6 @@ const (
 	colLabels        = "labels"
 	colAttachments   = "attachments"
 	colNotifications = "notifications"
+	colAgentRuns     = "agent_runs"
+	colAgentEvents   = "agent_events"
 )

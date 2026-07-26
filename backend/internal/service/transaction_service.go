@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,14 +43,54 @@ func NewTransactionService(
 	}
 }
 
+// TxnMeta carries optional provenance for a transaction. The zero value is a
+// plain human edit, which is why every existing caller is unaffected.
+type TxnMeta struct {
+	// TxnID pins the transaction's id instead of generating one. The agent
+	// derives it deterministically from its run so a journal entry is traceable
+	// back to the exact run step that produced it.
+	TxnID string
+	// Origin is domain.OriginHuman or domain.OriginAgent.
+	Origin string
+	// AgentRunID links the transaction to an agent run, enabling run-level revert.
+	AgentRunID string
+}
+
 // Apply validates, persists, and broadcasts one transaction. A multi-select
 // drag of N cards is one call with N ops.
 func (s *TransactionService) Apply(ctx context.Context, p *domain.Principal, boardID, clientID string, ops []domain.Op) (*domain.Transaction, error) {
+	return s.ApplyWithMeta(ctx, p, boardID, clientID, ops, TxnMeta{})
+}
+
+// ApplyWithMeta is Apply plus provenance. The AI agent uses it so its writes
+// are attributable and revertible; everything else calls Apply.
+//
+// There is deliberately no separate agent write path: the agent's ops traverse
+// the same pre-validation, the same IDOR guard, the same broadcast, and produce
+// the same precomputed inverses that power Ctrl+Z. What the agent gets EXTRA is
+// a Delegation on its principal, which can only ever subtract authority.
+func (s *TransactionService) ApplyWithMeta(ctx context.Context, p *domain.Principal, boardID, clientID string, ops []domain.Op, meta TxnMeta) (*domain.Transaction, error) {
 	if len(ops) == 0 || boardID == "" {
 		return nil, domain.ErrValidation
 	}
 	if _, err := s.access.RequireEdit(ctx, boardID, p); err != nil {
 		return nil, err
+	}
+
+	// A delegated (agent) principal is bounded before anything else is checked:
+	// wrong board, expired grant, or an oversized batch fails the whole call.
+	if d := p.Delegation; d != nil {
+		if d.Expired(time.Now().UTC()) {
+			return nil, domain.ErrForbidden
+		}
+		if d.RootBoardID == "" || d.OnBehalfOf != p.Sub {
+			return nil, domain.ErrForbidden
+		}
+		if d.MaxOps > 0 && len(ops) > d.MaxOps {
+			s.log.Warn("agent transaction exceeds delegated op budget",
+				zap.String("run", d.RunID), zap.Int("ops", len(ops)), zap.Int("max", d.MaxOps))
+			return nil, domain.ErrForbidden
+		}
 	}
 
 	// Pre-validate EVERY op before mutating anything. This is both an IDOR
@@ -61,6 +102,14 @@ func (s *TransactionService) Apply(ctx context.Context, p *domain.Principal, boa
 	for i := range ops {
 		if err := s.verifyOpScope(ctx, &ops[i], boardID, boardCache); err != nil {
 			s.log.Warn("op rejected in pre-validation",
+				zap.String("action", string(ops[i].Action)),
+				zap.String("element", ops[i].ElementID),
+				zap.Error(err))
+			return nil, err
+		}
+		if err := s.verifyDelegation(ctx, p, &ops[i], boardCache); err != nil {
+			s.log.Warn("op rejected by delegation",
+				zap.String("run", p.Delegation.RunID),
 				zap.String("action", string(ops[i].Action)),
 				zap.String("element", ops[i].ElementID),
 				zap.Error(err))
@@ -79,13 +128,23 @@ func (s *TransactionService) Apply(ctx context.Context, p *domain.Principal, boa
 		}
 	}
 
+	txnID := meta.TxnID
+	if txnID == "" {
+		txnID = s.newID()
+	}
+	origin := meta.Origin
+	if origin == "" {
+		origin = domain.OriginHuman
+	}
 	txn := &domain.Transaction{
-		ID:        s.newID(),
-		BoardID:   boardID,
-		UserID:    p.Sub,
-		ClientID:  clientID,
-		Ops:       ops,
-		CreatedAt: now,
+		ID:         txnID,
+		BoardID:    boardID,
+		UserID:     p.Sub,
+		ClientID:   clientID,
+		Ops:        ops,
+		CreatedAt:  now,
+		Origin:     origin,
+		AgentRunID: meta.AgentRunID,
 	}
 	if err := s.transactions.Insert(ctx, txn); err != nil {
 		return nil, err
@@ -127,7 +186,7 @@ func (s *TransactionService) notifyAssignments(ctx context.Context, p *domain.Pr
 		s.notifier.Notify(ctx, &domain.Notification{
 			ID: s.newID(), UserID: assignee, Kind: domain.NotifyAssignment,
 			ActorID: p.Sub, BoardID: boardID, ElementID: op.ElementID,
-			Message: p.Name + " assigned you a task: \"" + text + "\"",
+			Message:   p.Name + " assigned you a task: \"" + text + "\"",
 			CreatedAt: time.Now().UTC(),
 		})
 	}
@@ -180,7 +239,8 @@ func (s *TransactionService) verifyOpScope(ctx context.Context, op *domain.Op, b
 }
 
 // verifyMoveTarget ensures a new location.parentId still sits inside the
-// declared board (no reparenting into a foreign board via a move op).
+// declared board (no reparenting into a foreign board via a move op) and that
+// the move does not create a containment cycle.
 func (s *TransactionService) verifyMoveTarget(ctx context.Context, op *domain.Op, boardID string, cache map[string]bool) error {
 	loc, ok := op.Changes["location"].(map[string]any)
 	if !ok {
@@ -190,7 +250,94 @@ func (s *TransactionService) verifyMoveTarget(ctx context.Context, op *domain.Op
 	if !ok || newParent == "" {
 		return nil
 	}
-	return s.assertWithin(ctx, newParent, boardID, cache)
+	if err := s.assertWithin(ctx, newParent, boardID, cache); err != nil {
+		return err
+	}
+	// Reparenting an element INTO ITS OWN SUBTREE detaches that subtree from the
+	// board entirely — it becomes unreachable from Home while still existing.
+	// Only the depth cap on the ancestor walk kept this from looping forever.
+	if op.Action == domain.ActionMove || op.Action == domain.ActionUpdate {
+		return s.assertNoCycle(ctx, op.ElementID, newParent)
+	}
+	return nil
+}
+
+// assertNoCycle errors when newParent is elementID itself or one of its
+// descendants — i.e. when the move would make the element its own ancestor.
+func (s *TransactionService) assertNoCycle(ctx context.Context, elementID, newParent string) error {
+	if elementID == "" || newParent == "" {
+		return nil
+	}
+	id := newParent
+	for depth := 0; id != "" && depth < maxDepth; depth++ {
+		if id == elementID {
+			return domain.ErrValidation
+		}
+		el, err := s.elements.Get(ctx, id)
+		if err != nil {
+			// A parent that does not exist yet is a same-transaction create;
+			// verifyOpScope already proved it is in-board.
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		id = el.Location.ParentID
+	}
+	return nil
+}
+
+// verifyDelegation applies the EXTRA restrictions an agent grant imposes. It is
+// a no-op for human principals, so nothing about the existing write path
+// changes for them.
+//
+// Two independent gates must both pass for an agent write: the human's ACL role
+// (checked by AccessResolver above) and this grant. The grant can only ever
+// subtract — it never widens what the human could already do.
+func (s *TransactionService) verifyDelegation(ctx context.Context, p *domain.Principal, op *domain.Op, cache map[string]bool) error {
+	d := p.Delegation
+	if d == nil {
+		return nil
+	}
+	// Capability: absent capability is denied. There is no implicit grant.
+	if !d.Allows(domain.CapabilityForAction(op.Action)) {
+		return domain.ErrForbidden
+	}
+	// Consequence ceiling: a REVERSIBLE_WRITE grant cannot delete.
+	if !d.Consequence.AtLeast(domain.ConsequenceForAction(op.Action)) {
+		return domain.ErrForbidden
+	}
+	// Containment: every op must land inside the grant's root board, which was
+	// computed server-side at admission and never came from the model.
+	target := op.ElementID
+	if op.Action == domain.ActionCreate {
+		target = createParentID(op)
+	}
+	if err := s.assertWithin(ctx, target, d.RootBoardID, cache); err != nil {
+		return err
+	}
+	if err := s.verifyMoveTarget(ctx, op, d.RootBoardID, cache); err != nil {
+		return err
+	}
+	// Structural denials the agent may never reach, whatever it proposes.
+	if el, err := s.elements.Get(ctx, op.ElementID); err == nil {
+		if isHome(el) {
+			return domain.ErrHomeBoard
+		}
+	}
+	if _, touchesACL := op.Changes["acl"]; touchesACL {
+		return domain.ErrForbidden
+	}
+	if content, ok := op.Changes["content"].(map[string]any); ok {
+		// isHome / isTemplate are privileged flags that live in freely-patchable
+		// content. An agent must never be able to set them.
+		for _, k := range []string{"isHome", "isTemplate"} {
+			if _, present := content[k]; present {
+				return domain.ErrForbidden
+			}
+		}
+	}
+	return nil
 }
 
 // assertWithin errors unless boardID is an ancestor-or-self of elementID.

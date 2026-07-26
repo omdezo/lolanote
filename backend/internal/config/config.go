@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -42,39 +44,57 @@ type Config struct {
 	R2PublicBaseURL   string `mapstructure:"R2_PUBLIC_BASE_URL"`
 
 	CORSOrigins string `mapstructure:"CORS_ORIGINS"` // comma-separated
+
+	// AI agent. Leaving AnthropicAPIKey empty disables the agent entirely: the
+	// API reports the feature as unavailable and no run can be admitted. That
+	// is the intended default — the agent is opt-in per deployment.
+	AgentProvider    string  `mapstructure:"AGENT_PROVIDER"` // anthropic | gemini; empty infers from the keys present
+	AnthropicAPIKey  string  `mapstructure:"ANTHROPIC_API_KEY"`
+	GeminiAPIKey     string  `mapstructure:"GEMINI_API_KEY"`
+	AgentModel       string  `mapstructure:"AGENT_MODEL"`         // empty lets the provider choose its default
+	AgentDailyCapUSD float64 `mapstructure:"AGENT_DAILY_CAP_USD"` // per user, per UTC day; 0 = uncapped
+	// Rates for AGENT_MODEL, in USD per million tokens. Set these when the
+	// model has no built-in price, otherwise every run costs a reported $0 and
+	// AGENT_DAILY_CAP_USD can never trigger.
+	AgentPriceInPer1M  float64 `mapstructure:"AGENT_PRICE_INPUT_PER_1M"`
+	AgentPriceOutPer1M float64 `mapstructure:"AGENT_PRICE_OUTPUT_PER_1M"`
 }
 
 // Load reads .env (if present) and the environment into a validated Config.
 func Load() (*Config, error) {
-	_ = godotenv.Load() // best-effort; absent in containers where env is injected
+	loadDotEnv() // best-effort; absent in containers where env is injected
 
 	v := viper.New()
 	v.AutomaticEnv()
 
 	defaults := map[string]string{
-		"APP_ENV":                "development",
-		"HTTP_ADDR":              ":8080",
-		"LOG_LEVEL":              "info",
-		"MONGO_URI":              "mongodb://localhost:27017",
-		"MONGO_DB":               "qomranote",
-		"KEYCLOAK_ISSUER":        "http://localhost:8081/realms/qomranote",
-		"KEYCLOAK_INTERNAL_BASE": "",
-		"KEYCLOAK_REALM":         "qomranote",
+		"APP_ENV":                      "development",
+		"HTTP_ADDR":                    ":8080",
+		"LOG_LEVEL":                    "info",
+		"MONGO_URI":                    "mongodb://localhost:27017",
+		"MONGO_DB":                     "qomranote",
+		"KEYCLOAK_ISSUER":              "http://localhost:8081/realms/qomranote",
+		"KEYCLOAK_INTERNAL_BASE":       "",
+		"KEYCLOAK_REALM":               "qomranote",
 		"KEYCLOAK_ADMIN_CLIENT_ID":     "qomranote-api",
 		"KEYCLOAK_ADMIN_CLIENT_SECRET": "",
 		"KEYCLOAK_WEB_CLIENT_ID":       "qomranote-web",
-		"STORAGE_DRIVER":         "local",
-		"LOCAL_STORAGE_DIR":      "./data/uploads",
-		"PUBLIC_API_BASE":        "http://localhost:8080",
-		"R2_BUCKET":              "qomranote",
-		"CORS_ORIGINS":           "http://localhost:5173,http://localhost:3000",
+		"STORAGE_DRIVER":               "local",
+		"LOCAL_STORAGE_DIR":            "./data/uploads",
+		"PUBLIC_API_BASE":              "http://localhost:8080",
+		"R2_BUCKET":                    "qomranote",
+		"CORS_ORIGINS":                 "http://localhost:5173,http://localhost:3000",
 	}
 	for key, val := range defaults {
 		v.SetDefault(key, val)
 		_ = v.BindEnv(key)
 	}
 	// Keys with no default still need explicit binding for Unmarshal to see them.
-	for _, key := range []string{"R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL"} {
+	for _, key := range []string{
+		"R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL",
+		"AGENT_PROVIDER", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "AGENT_MODEL", "AGENT_DAILY_CAP_USD",
+		"AGENT_PRICE_INPUT_PER_1M", "AGENT_PRICE_OUTPUT_PER_1M",
+	} {
 		_ = v.BindEnv(key)
 	}
 
@@ -90,6 +110,31 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: STORAGE_DRIVER=r2 requires R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY")
 	}
 	return &cfg, nil
+}
+
+// loadDotEnv finds .env by walking up from the working directory.
+//
+// The file lives at the repository root, but `go run ./cmd/qomranote` is
+// normally invoked from backend/. Looking only in the working directory meant
+// local runs silently ignored .env and reported missing configuration that was
+// in fact present one level up.
+func loadDotEnv() {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	for i := 0; i < 4; i++ { // repo roots are never far above a package
+		candidate := filepath.Join(dir, ".env")
+		if _, err := os.Stat(candidate); err == nil {
+			_ = godotenv.Load(candidate)
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
+		}
+		dir = parent
+	}
 }
 
 // CORSOriginList splits the configured origins.

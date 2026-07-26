@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
+	"qomranote/backend/internal/agent"
 	"qomranote/backend/internal/auth"
 	"qomranote/backend/internal/domain"
 	"qomranote/backend/internal/realtime"
@@ -32,13 +33,16 @@ type Handlers struct {
 	Comments      *service.CommentService
 	Labels        *service.LabelService
 	Notifications domain.NotificationRepository
-	Access        *service.AccessResolver
-	Hub           *realtime.Hub
-	Verifier      *auth.Verifier
-	Tickets       *auth.TicketStore
-	Local         *storage.LocalPresigner // nil when the R2 driver is active
-	ReadyCheck    func(ctx context.Context) error
-	Log           *zap.Logger
+	// Agent is nil when the deployment has no model provider configured; the
+	// routes then report the feature as unavailable rather than failing oddly.
+	Agent      *agent.Service
+	Access     *service.AccessResolver
+	Hub        *realtime.Hub
+	Verifier   *auth.Verifier
+	Tickets    *auth.TicketStore
+	Local      *storage.LocalPresigner // nil when the R2 driver is active
+	ReadyCheck func(ctx context.Context) error
+	Log        *zap.Logger
 }
 
 // ---- system ----

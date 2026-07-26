@@ -101,6 +101,20 @@ func registerRoutes(e *echo.Echo, h *Handlers) {
 	api.GET("/notifications", h.ListNotifications)
 	api.POST("/notifications/read", h.MarkNotificationsRead)
 
+	// AI agent. Runs are admitted, watched, and decided on here; the run's own
+	// writes go through POST /transactions like everyone else's.
+	ai := api.Group("/agent")
+	ai.GET("/capabilities", h.AgentCapabilities)
+	ai.POST("/runs", h.CreateAgentRun)
+	ai.GET("/runs", h.ListAgentRuns)
+	ai.GET("/runs/:id", h.GetAgentRun)
+	ai.GET("/runs/:id/events", h.AgentRunEvents) // ?since=<sequence> — resumable
+	ai.POST("/runs/:id/apply", h.ApplyAgentRun)
+	ai.POST("/runs/:id/refine", h.RefineAgentRun)
+	ai.POST("/runs/:id/discard", h.DiscardAgentRun)
+	ai.POST("/runs/:id/cancel", h.CancelAgentRun)
+	ai.POST("/runs/:id/revert", h.RevertAgentRun)
+
 	// Realtime — the client first exchanges its bearer for a single-use
 	// ticket, then connects with ?ticket=… (keeps tokens out of WS URLs/logs).
 	api.POST("/realtime/ticket", h.IssueRealtimeTicket)

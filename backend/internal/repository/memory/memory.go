@@ -113,6 +113,26 @@ func (r *ElementRepo) MergePatch(_ context.Context, id string, patch domain.Cont
 			el.Location.ParentID = p
 		}
 	}
+	// labelIds is a patchable root in Mongo (see elements.go patchableRoots).
+	// The double has to accept it too, or a test can pass here while the same
+	// write behaves differently in production — the failure mode a test double
+	// exists to prevent.
+	switch v := patch["labelIds"].(type) {
+	case []string:
+		el.LabelIDs = append([]string(nil), v...)
+	case []any:
+		ids := make([]string, 0, len(v))
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				ids = append(ids, s)
+			}
+		}
+		el.LabelIDs = ids
+	case nil:
+		if _, present := patch["labelIds"]; present {
+			el.LabelIDs = nil
+		}
+	}
 	el.UpdatedAt = time.Now().UTC()
 	return clone(el), nil
 }
@@ -328,6 +348,16 @@ var _ domain.TransactionRepository = (*TransactionRepo)(nil)
 func (r *TransactionRepo) Insert(_ context.Context, t *domain.Transaction) error {
 	r.items = append(r.items, t)
 	return nil
+}
+
+func (r *TransactionRepo) Get(_ context.Context, id string) (*domain.Transaction, error) {
+	for _, t := range r.items {
+		if t.ID == id {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, domain.ErrNotFound
 }
 
 func (r *TransactionRepo) ListByBoard(_ context.Context, boardID string, limit int) ([]*domain.Transaction, error) {
