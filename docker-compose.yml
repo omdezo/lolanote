@@ -92,6 +92,19 @@ services:
       R2_BUCKET: ${R2_BUCKET:-qomranote}
       R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
       CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      # ---- AI agent (opt-in) ----
+      # With no provider key the harness is nil: /api/v1/agent/* reports the
+      # feature unavailable and every entry point stays hidden. Nothing else
+      # about the stack changes, so the default stack runs without one.
+      AGENT_PROVIDER: ${AGENT_PROVIDER:-anthropic}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AGENT_DAILY_CAP_USD: ${AGENT_DAILY_CAP_USD:-2.00}
+      # Leave blank unless the model is missing from the built-in price table
+      # or you are billed a negotiated rate. Setting these overrides it.
+      AGENT_PRICE_INPUT_PER_1M: ${AGENT_PRICE_INPUT_PER_1M:-}
+      AGENT_PRICE_OUTPUT_PER_1M: ${AGENT_PRICE_OUTPUT_PER_1M:-}
     ports:
       - "8080:8080"
     volumes:

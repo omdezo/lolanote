@@ -56,6 +56,15 @@ migrate: ## Ensure Mongo indexes + purge expired trash
 seed: ## Seed the built-in template board library
 	cd backend && $(GO) run ./cmd/qomranote seed
 
+agent-check: ## Run the AI agent live against a synthetic board (needs a provider key)
+	cd backend && $(GO) run ./cmd/qomranote agent-check
+
+agent-check-dry: ## Print the context the agent would see, without calling a model
+	cd backend && $(GO) run ./cmd/qomranote agent-check --dry-run
+
+fmt: ## Format the backend
+	cd backend && gofmt -w ./internal ./cmd
+
 ## ---- frontend (TypeScript) ----
 
 dev-web: ## Vite dev server on :5173 (proxies to the local API)
@@ -65,6 +74,15 @@ typecheck: ## Frontend type-check
 	cd frontend && $(NPM) run typecheck
 
 web-build: ## Production frontend build
+	cd frontend && $(NPM) run build
+
+## ---- gates ----
+
+verify: ## Everything CI runs: format check, vet, tests, type-check, web build
+	cd backend && test -z "$$(gofmt -l ./internal ./cmd)" || (echo "gofmt: files need formatting" && exit 1)
+	cd backend && $(GO) vet ./...
+	cd backend && $(GO) test ./...
+	cd frontend && $(NPM) run typecheck
 	cd frontend && $(NPM) run build
 
 ## ---- housekeeping ----

@@ -18,6 +18,14 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Format
+        # gofmt exits 0 whether or not anything is misformatted; it reports by
+        # listing files. Fail on a non-empty list, or this check passes always.
+        run: |
+          unformatted="$(gofmt -l ./internal ./cmd)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -45,3 +53,28 @@ jobs:
         run: npx vitest run --passWithNoTests
       - name: Build
         run: npx vite build
+
+  # The images are the artefact that actually ships, and nothing else in this
+  # workflow compiles them. A Dockerfile can drift from a passing build for a
+  # long time before anyone notices — usually at deploy.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Validate compose
+        run: docker compose config -q

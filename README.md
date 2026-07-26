@@ -151,13 +151,54 @@ automatically and syncs to your account:
 4. `docker compose up -d api` (or restart `make dev-api`). Presigned uploads
    now go straight to R2 — no other change needed.
 
+## AI agent (opt-in)
+
+Ask Qomra to do anything on a board, in your own words, from the bar at the
+bottom of the canvas. It can make boards, columns, notes, to-do lists, links
+and tables; move, rename and rewrite; tag, colour and tick; draw connections;
+and mirror a card into a second place.
+
+**It gets no new write path.** The agent is a delegated, attenuated principal
+on the same transaction pipeline your own edits use, so every change it makes
+inherits durability, ordering, the access guard, live sync, one Ctrl+Z and one
+revert. Its grant is minted per run, scoped to that board's subtree, and
+expires — it cannot delete boards, change sharing, or reach anything outside
+the board you started it on.
+
+**Nothing is written until you accept.** Reads run live; writes are staged into
+a plan you see as ghosts on the canvas, positioned exactly where they will
+land. Review it line by line, drop individual changes, ask for a different plan
+("use two columns instead"), or apply the lot as a single transaction. Board
+content is trust-labelled data, never instruction: a note telling the agent to
+ignore its rules is treated as what it is, and a run that content repeatedly
+tries to steer is held for review rather than applied.
+
+Enable it by setting one provider key:
+
+```bash
+# .env — either provider; leave both blank and the feature stays hidden
+AGENT_PROVIDER=anthropic     # or: gemini
+ANTHROPIC_API_KEY=sk-ant-...
+AGENT_DAILY_CAP_USD=2.00     # per user, per UTC day
+```
+
+With no key the harness is nil: `/api/v1/agent/*` reports the feature
+unavailable, every entry point stays hidden, and nothing else changes. Costs
+are metered per run against a built-in price table; the server warns at boot if
+your model has no known rate, because an unpriced model reports $0 and the cap
+could never bind.
+
+Design notes and the remediation audit: [AI_AGENT_ARCHITECTURE.md](AI_AGENT_ARCHITECTURE.md).
+
 ## CLI (Cobra)
 
 ```
-qomranote serve      # run the API server
-qomranote migrate    # ensure Mongo indexes, purge expired trash (90 days)
-qomranote seed       # seed the system template library
-qomranote version    # build version
+qomranote serve       # run the API server
+qomranote migrate     # ensure Mongo indexes, purge expired trash (90 days)
+qomranote seed        # seed the system template library
+qomranote agent-check # run the agent against a synthetic board and print the plan
+                      #   --dry-run prints the compiled context without calling a model
+qomranote version     # build version
 ```
 
 ## API surface
@@ -165,7 +206,8 @@ qomranote version    # build version
 Full REST spec in [PLAN.md §3.3](PLAN.md) — `/api/v1`: bootstrap (`/me`),
 boards/children/unsorted, element CRUD via transactions, trash, presigned
 attachments, link metadata, sharing (4 mechanisms), search, comments,
-labels, notifications, export, plus `/ws` for realtime. Errors use a
+labels, notifications, export, the AI agent (`/agent/runs`, with
+refine/apply/discard/revert), plus `/ws` for realtime. Errors use a
 consistent `{"error":{"code","message"}}` envelope; all mutating routes are
 Keycloak-token protected.
 
