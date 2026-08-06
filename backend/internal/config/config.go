@@ -21,6 +21,12 @@ type Config struct {
 
 	MongoURI string `mapstructure:"MONGO_URI"`
 	MongoDB  string `mapstructure:"MONGO_DB"`
+	// Name of the replica set mongod runs as; empty means standalone. A
+	// standalone node has no oplog and no multi-document transactions, which is
+	// why the write path compensates by hand. Set this and `qomranote migrate`
+	// initiates a single-node set on a member that has never been configured.
+	// It does NOT put replicaSet= into the URI — that stays MONGO_URI's job.
+	MongoReplicaSet string `mapstructure:"MONGO_REPLICA_SET"`
 
 	// Keycloak. Issuer is the URL embedded in tokens (as browsers see it);
 	// InternalBase is how the API container reaches Keycloak. They differ in
@@ -53,6 +59,18 @@ type Config struct {
 	GeminiAPIKey     string  `mapstructure:"GEMINI_API_KEY"`
 	AgentModel       string  `mapstructure:"AGENT_MODEL"`         // empty lets the provider choose its default
 	AgentDailyCapUSD float64 `mapstructure:"AGENT_DAILY_CAP_USD"` // per user, per UTC day; 0 = uncapped
+	// The two routing policies. Every turn used to pay authoring rates —
+	// including the ones that only read the board, classified an ambiguity or
+	// synthesised a summary — while the turns that actually need judgement got
+	// the same model chosen for cost. Routing, tier annotation and the
+	// per-phase spend ledger all shipped; these two are what let a deployment
+	// point them at two real models.
+	//
+	// Both optional, and both defaulting to AGENT_MODEL: left empty (or set
+	// equal to it) cognition.New returns the single client it always returned,
+	// so an unchanged deployment behaves bit-identically.
+	AgentModelFast   string `mapstructure:"AGENT_MODEL_FAST"`
+	AgentModelStrong string `mapstructure:"AGENT_MODEL_STRONG"`
 	// Rates for AGENT_MODEL, in USD per million tokens. Set these when the
 	// model has no built-in price, otherwise every run costs a reported $0 and
 	// AGENT_DAILY_CAP_USD can never trigger.
@@ -91,8 +109,10 @@ func Load() (*Config, error) {
 	}
 	// Keys with no default still need explicit binding for Unmarshal to see them.
 	for _, key := range []string{
+		"MONGO_REPLICA_SET",
 		"R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_BASE_URL",
 		"AGENT_PROVIDER", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "AGENT_MODEL", "AGENT_DAILY_CAP_USD",
+		"AGENT_MODEL_FAST", "AGENT_MODEL_STRONG",
 		"AGENT_PRICE_INPUT_PER_1M", "AGENT_PRICE_OUTPUT_PER_1M",
 	} {
 		_ = v.BindEnv(key)
@@ -109,7 +129,135 @@ func Load() (*Config, error) {
 	if cfg.StorageDriver == "r2" && (cfg.R2AccountID == "" || cfg.R2AccessKeyID == "" || cfg.R2SecretAccessKey == "") {
 		return nil, fmt.Errorf("config: STORAGE_DRIVER=r2 requires R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY")
 	}
+	if err := cfg.refuseUnsafeProduction(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// placeholderSecret is the value docker-compose.yml supplies when nothing else
+// does. It is in the repository, so it is public.
+const placeholderSecret = "qomranote-api-secret-change-me"
+
+// refuseUnsafeProduction stops the server rather than starting it wrong.
+//
+// OPS2. Two settings turn the whole authorization model off, and both had a
+// default that runs: docker-compose.yml ships
+// KEYCLOAK_ADMIN_CLIENT_SECRET=qomranote-api-secret-change-me — a credential
+// committed to a public repository — and CORS_ORIGINS is a free string that
+// accepts "*", which hands any page on the internet the ability to drive this
+// API with the visitor's bearer token. Neither produced so much as a log line.
+// A deployment can therefore be fully "working" and completely open, and the
+// only signal is that nothing looks wrong.
+//
+// It refuses only under APP_ENV=production, and only for the two settings where
+// the wrong value is unambiguous. The everyday stack sets APP_ENV=development
+// and is untouched. Everything softer — plaintext issuers, the local storage
+// driver — is a WARNING (see ProductionWarnings), because those have legitimate
+// deployments behind a terminating proxy and refusing them would be the tool
+// deciding it knows the topology better than the operator does.
+func (c *Config) refuseUnsafeProduction() error {
+	if !c.IsProduction() {
+		return nil
+	}
+	var problems []string
+	if strings.Contains(c.KeycloakAdminSecret, "change-me") || c.KeycloakAdminSecret == placeholderSecret {
+		problems = append(problems,
+			"KEYCLOAK_ADMIN_CLIENT_SECRET is still the placeholder from docker-compose.yml, "+
+				"which is committed to this repository and therefore public — set a real secret")
+	}
+	for _, origin := range c.CORSOriginList() {
+		if origin == "*" {
+			problems = append(problems,
+				"CORS_ORIGINS contains \"*\", which lets any page on the internet drive this API "+
+					"with a signed-in visitor's token — list the origins explicitly")
+			break
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("config: refusing to start in production:\n  - %s", strings.Join(problems, "\n  - "))
+}
+
+// ProductionWarnings names settings that are probably wrong in production but
+// have honest deployments where they are not.
+//
+// Returned rather than logged here because config owns no logger, and returned
+// rather than fatal because each of these is a judgement about a topology this
+// package cannot see: an http issuer is correct behind a proxy that terminates
+// TLS, and the local storage driver is correct on a single host with a backed-up
+// volume. What is NOT acceptable is silence — the operator should have been told
+// once, at boot.
+func (c *Config) ProductionWarnings() []string {
+	if !c.IsProduction() {
+		return nil
+	}
+	var out []string
+	if strings.HasPrefix(c.KeycloakIssuer, "http://") {
+		out = append(out, "KEYCLOAK_ISSUER is http://, so bearer tokens cross the network in clear text "+
+			"unless something in front of this terminates TLS")
+	}
+	if strings.HasPrefix(c.PublicAPIBase, "http://") {
+		out = append(out, "PUBLIC_API_BASE is http://, so upload and attachment URLs are handed out as plaintext")
+	}
+	if c.StorageDriver == "local" {
+		out = append(out, "STORAGE_DRIVER=local keeps every uploaded file on this host's disk — "+
+			"`qomranote backup` does NOT include them, so back up the uploads volume separately")
+	}
+	// OPS3 — the database has no credentials, and nothing anywhere said so.
+	//
+	// docker-compose.yml starts `mongo:7` with no MONGO_INITDB_ROOT_* pair, wires
+	// the API to `mongodb://mongo:27017`, and publishes "27017:27017" on the host.
+	// So on any deployment that reuses that file, the whole product's
+	// authorization model — Keycloak, the ACL resolver, the delegation grant, the
+	// containment walk, every check this codebase has been hardening — sits behind
+	// a TCP port that answers to anyone who can reach it, with no password. A
+	// person who can open 27017 does not need to defeat those checks; they read
+	// and rewrite every board, every comment and every journal row underneath
+	// them. It is the shortest path past all of it and it produced no log line.
+	//
+	// A WARNING rather than a refusal, matching this function's doctrine: an
+	// unauthenticated Mongo on a private network with the port unpublished is a
+	// real, if unwise, topology, and refusing it would be this package claiming to
+	// know a network it cannot see. What is not defensible is silence.
+	if !mongoURIHasCredentials(c.MongoURI) {
+		out = append(out, "MONGO_URI carries no username or password, so anything that can reach "+
+			"the database port reads and rewrites every board without passing a single "+
+			"permission check — enable authentication, and do not publish 27017")
+	}
+	if c.AnthropicAPIKey != "" || c.GeminiAPIKey != "" {
+		if c.AgentDailyCapUSD <= 0 {
+			out = append(out, "a model provider is configured with AGENT_DAILY_CAP_USD unset or 0, "+
+				"which means no per-user daily spend ceiling")
+		}
+	}
+	return out
+}
+
+// mongoURIHasCredentials reports whether a connection string carries a userinfo
+// section — mongodb://user:pass@host — without parsing the URI.
+//
+// Deliberately textual and deliberately generous. A full url.Parse would have to
+// take a position on mongodb+srv, on multi-host seed lists and on the dozen
+// query options a real deployment carries, and getting any of that subtly wrong
+// would make this warn about a database that IS authenticated — which is how a
+// boot-time check trains an operator to ignore it. The one thing it must never
+// do is claim credentials exist when they do not, and an '@' before the first
+// '/' of the host section is the only place a Mongo URI can put them.
+//
+// The scheme is stripped first so a password containing '/' cannot matter and a
+// hostname cannot be mistaken for userinfo.
+func mongoURIHasCredentials(uri string) bool {
+	rest := uri
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	// Everything past the host section (path, query, fragment) is not userinfo.
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.Contains(rest, "@")
 }
 
 // loadDotEnv finds .env by walking up from the working directory.

@@ -44,7 +44,7 @@ func (s *staging) noteDestination(ctx context.Context, boardID string) error {
 		// The same discipline as element ids: a board id the run was never
 		// shown can only have come from content, so it is refused and counted
 		// rather than quietly honoured.
-		s.outOfScope++
+		s.rejectID(boardID)
 		return fmt.Errorf("%s is not a board you have looked at — search for it first", boardID)
 	}
 	for _, d := range s.plan.Destinations {

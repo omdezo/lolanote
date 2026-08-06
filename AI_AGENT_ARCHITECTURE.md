@@ -843,3 +843,138 @@ QomraNote has 18 element types. The agent can create 5.
 - No provider fallback.
 - No repair loop when a tool call fails repeatedly.
 - No eval suite — organizing quality is judged by looking at screenshots.
+
+---
+
+# §30 — Capability parity (2026-07-29)
+
+## 30.0 The rule this section exists to enforce
+
+**A capability is real only when four things are true.** Missing any one of them
+produces a tool that compiles, passes its tests, and does nothing a person can see:
+
+1. **A schema** the model can call.
+2. **A handler** that resolves ids and enforces the containment matrix.
+3. **A compiler branch** writing the keys the *renderer* reads.
+4. **A digest entry** showing the current value, so the model can revise
+   rather than overwrite.
+
+Point 3 has failed four separate times in this codebase — `rows` vs `cells`,
+`filename` vs `caption`, `label` vs `title`, `text` vs `textPreview`. Each shipped
+green. The test that catches it compiles the action and asserts on the *content
+map*, never on the action alone.
+
+Point 4 is the one that gets skipped. An edit tool over a value the model cannot
+see is a tool it will only ever use to overwrite. Two more of these were found and
+fixed here: a `COLOR_SWATCH` was read under `color` while it stores `hex` (so every
+palette rendered blank), and a column never reported whether it was folded.
+
+## 30.1 What was missing
+
+The agent could **create** and never **revise**. Asked to add a line to a budget
+table, its only route was a second table beside the first — the same failure as
+the to-do list before `add_tasks`, repeated across every type.
+
+Three of the app's own toolbar buttons had no counterpart in the plan vocabulary
+at all: **DOCUMENT**, **COLOR_SWATCH**, **ALIAS**.
+
+## 30.2 What was added
+
+| Tool | Kind | Closes |
+|---|---|---|
+| `write_document` | `ActWriteDocument` | "Write the treatment" came back as a sticky note |
+| `add_color` | `ActAddColor` | Palettes were described in words |
+| `link_board` | `ActLinkBoard` | A board could not be reachable from two places |
+| `edit_table` | `ActEditTable` | Tables were create-only |
+| `set_url` | `ActSetURL` | A dead link was permanent |
+| `set_caption` | `ActSetCaption` | An uncaptioned image is unreferenceable |
+| `collapse_column` | `ActCollapse` | No way to make an overgrown board readable |
+| `duplicate` | `ActDuplicate` | Episode 2 had to be rebuilt by hand |
+| `convert` | `ActConvert` | A note that outgrew itself had to be recreated, cutting its arrows and comments |
+
+**SKETCH is deliberately absent.** Its content is an array of stroke coordinates.
+A model generating those is not drawing, it is producing plausible noise.
+
+## 30.3 Design decisions worth keeping
+
+- **`duplicate` resolves its subtree at STAGING time**, not at compile time.
+  The review list and the cost estimate must be able to say *"3 elements"* before
+  the person approves. Resolving later shows "1 change" for something that writes
+  forty. Ids are derived from `(runID, seq, sourceID)` so a retried apply is
+  byte-identical rather than a second copy of everything.
+- **`convert` is an update, never a delete-and-recreate.** The element keeps its
+  id, and with it every connector drawn to it, every comment on it, and every
+  clone of it. Recreating severs all three silently.
+- **`convert` to `TASK_LIST` stages a paired `add_tasks`.** The items are separate
+  elements the conversion op cannot create; without the pairing the person gets an
+  empty list where their note used to be.
+- **`edit_table` takes the whole finished grid.** `cells` is replaced wholesale by
+  MergePatch, so a partial write would leave the table in a state it was never in.
+  Requiring the full grid also forces the model to have *read* it.
+- **Connectors cascade with their endpoints.** Deleting a card now trashes the
+  lines drawn to it, under the same batch id so an undo brings the relationships
+  back. Seven orphans had accumulated on one real board; `migrate` sweeps them.
+
+## 30.4 Two harness bugs found while testing this
+
+Both had been quietly misleading every reading of the eval output:
+
+- **The eval printed a critique the model never saw.** `Critique()` takes no
+  expectation; the review turn uses `CritiqueFor(want)`. A reporting run showed
+  *"4 changes is a sketch"* in the report while having been told no such thing.
+  Fixed with `CritiqueForIntent`.
+- **The review turn's closing questions contradicted its own mismatch warning.**
+  They are written for authoring and were appended unconditionally, so a reporting
+  run was told *"a question was asked — withdraw those edits"* and then, two
+  paragraphs later, *"is this a sketch? go back and put the real work in"*. It did
+  the latter, and said so in `unmet`: *"I previously only left a comment about
+  this, rather than acting on it."* Last instruction wins; they are now
+  register-aware.
+
+## 30.5 Guarding the seam that has no compiler
+
+The frontend keeps its own copy of *"which kinds create an element"*, because
+dropping a create from the review list has to cascade to its children. Two lists,
+nothing between them — and it had already drifted: `place_file`, `create_heading`
+and `comment` all create and none were listed.
+
+`frontenddrift_test.go` reads the TypeScript and compares it to the registry. That
+is unusual and it is the only thing that works: every other guard proves each half
+is internally consistent, which is exactly what they both were while disagreeing.
+
+## 30.6 Coverage
+
+Corpus section **F** (six probes) tests each capability by asking for the edit and
+failing on the workaround — building a second table, rebuilding a column by hand,
+answering a page with notes. That is the shape the failure actually took on real
+boards, not a hypothetical.
+
+## 30.7 An answer that never reaches the board
+
+Asked *"what is missing from this plan?"*, a run named the gaps correctly and
+staged **nothing**. The whole answer lived in `summary` — run-panel text that
+disappears when the panel closes. A month later the board could not say what was
+found, and the person was handed a paragraph to copy somewhere by hand.
+
+The review turn cannot catch this: `reviewTurn` returns early on an empty plan,
+so the run that stages nothing is precisely the run that is never reviewed. The
+check therefore lives at `finish`, in-turn, where the model can act on it without
+paying for another round trip.
+
+It is deliberately narrow — it fires only when the run demonstrably **has** an
+answer and put it in the wrong place:
+
+- the request reads as REPORTING, and
+- nothing is staged, and
+- the summary is long enough (120 chars) to be a real answer, and
+- it has not already fired this run.
+
+*"Nothing is missing"* is a short summary and passes. A request the agent cannot
+carry out stages nothing legitimately and is not a question. Firing twice would
+be a loop that burns the step budget, so it fires once and then lets the run
+finish.
+
+This is the second half of the REPORTING register. The first half — *do not
+restructure the board while answering a question* — was already enforced by
+`Mismatch`. Both failures were live at once, in opposite directions, and fixing
+only one turned a run that did too much into a run that did nothing.

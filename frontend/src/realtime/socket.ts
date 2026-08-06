@@ -4,7 +4,11 @@
 // local mutations use.
 import { api, getShareToken } from '../api/client';
 import { clientId, useBoard } from '../store/boardStore';
+import { useSettings } from '../store/settingsStore';
 import type { PresenceUser, Txn } from '../api/types';
+
+/** Must match domain.OriginAgent on the server — lower case, not "AGENT". */
+const AGENT_ORIGIN = 'agent';
 
 let socket: WebSocket | null = null;
 let currentBoard = '';
@@ -66,7 +70,25 @@ async function open() {
     switch (env.event) {
       case 'transaction.applied': {
         const txn = env.data as Txn;
-        if (txn.clientId !== clientId) store.applyOps(txn.ops);
+        if (txn.clientId === clientId) break; // our own echo
+        store.applyOps(txn.ops);
+        // An agent run acting on YOUR behalf is your edit. It arrives over the
+        // socket like a collaborator's, which is why Ctrl+Z used to skip it and
+        // silently undo whatever you did before it instead — while the
+        // auto-apply tooltip promised "still one undo".
+        //
+        // A colleague's run is NOT adopted: it is their change on shared
+        // content, and reaching into it from your keyboard is exactly the
+        // behaviour local undo exists to prevent.
+        //
+        // The run id travels with it. Without the tag the entry was
+        // indistinguishable from a hand edit, so Ctrl+Z posted a raw inverse
+        // the run never learned about — after which the outcome card's Undo was
+        // a no-op and Ctrl+Shift+Z put the work back while the run still
+        // recorded it as reverted.
+        if (txn.origin === AGENT_ORIGIN && txn.userId && txn.userId === useSettings.getState().sub) {
+          store.adoptRemote(txn.ops, txn.agentRunId);
+        }
         break;
       }
       case 'presence.state':

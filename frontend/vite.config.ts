@@ -5,6 +5,15 @@ import react from '@vitejs/plugin-react';
 // and API share an origin in development.
 export default defineConfig({
   plugins: [react()],
+  // Component tests render for real, in a DOM. renderToString cannot stand in
+  // for it: zustand 5 hands React getInitialState as the server snapshot, so a
+  // server render sees the store as it was at boot and every selector-driven
+  // component draws itself empty — which is a false pass on exactly the
+  // components most worth checking.
+  test: {
+    environment: 'jsdom',
+    environmentMatchGlobs: [['**/*.test.ts', 'node']],
+  },
   server: {
     port: 5173,
     proxy: {

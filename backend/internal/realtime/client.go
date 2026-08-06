@@ -98,6 +98,19 @@ func (c *Client) Send(msg []byte) {
 	}
 }
 
+// evict ends the session because the authorization that opened it is gone.
+//
+// 4403 rather than 4401: the client's reconnect path treats 4401 as a
+// credential rollover and comes straight back with a fresh ticket, which on a
+// revocation would reconnect a person who has just been removed. This code
+// tells it the door is shut, not that the key expired.
+func (c *Client) evict(reason string) {
+	_ = c.conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(4403, reason), time.Now().Add(writeWait))
+	c.close()
+	_ = c.conn.Close()
+}
+
 func (c *Client) close() {
 	c.once.Do(func() {
 		if c.authTimer != nil {

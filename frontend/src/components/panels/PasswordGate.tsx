@@ -2,8 +2,10 @@
 // resolving a shared link returns 401; on submit the password rides along as
 // X-Share-Password and the resolve is retried.
 import { useState } from 'react';
+import { useT } from '../../i18n';
 
 export function PasswordGate({ onSubmit }: { onSubmit: (password: string) => Promise<void> }) {
+  const t = useT();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,7 +17,7 @@ export function PasswordGate({ onSubmit }: { onSubmit: (password: string) => Pro
     try {
       await onSubmit(password);
     } catch {
-      setError('Incorrect password. Try again.');
+      setError(t('gate.wrong'));
     } finally {
       setBusy(false);
     }
@@ -25,19 +27,20 @@ export function PasswordGate({ onSubmit }: { onSubmit: (password: string) => Pro
     <div className="boot-screen">
       <div className="boot-mark">Q</div>
       <div className="gate-card">
-        <div className="gate-title">This board is password protected</div>
+        <div className="gate-title">{t('gate.title')}</div>
         <input
           className="search-input"
           type="password"
           autoFocus
-          placeholder="Enter password"
+          aria-label={t('gate.placeholder')}
+          placeholder={t('gate.placeholder')}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void submit()}
         />
-        {error && <div className="gate-error">{error}</div>}
+        {error && <div className="gate-error" role="alert">{error}</div>}
         <button className="topbar-btn primary gate-submit" onClick={() => void submit()} disabled={busy}>
-          {busy ? 'Checking…' : 'View board'}
+          {busy ? t('gate.checking') : t('gate.view')}
         </button>
       </div>
     </div>

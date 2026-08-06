@@ -81,4 +81,25 @@ func (r *AttachmentRepo) DeleteByOwner(_ context.Context, ownerSub string) error
 	return nil
 }
 
+// ListByOwner enumerates a person's uploads.
+//
+// The index existed and the method did not, which is why account deletion could
+// delete the ROWS that named the files and never the files: after "Delete
+// forever" every image and PDF stayed byte-for-byte in the bucket, still
+// fetchable through the unauthenticated blob route, and with the naming rows
+// gone nothing in the product could even enumerate what had been left. That is
+// worse than not deleting — it is unauditable non-deletion.
+func (r *AttachmentRepo) ListByOwner(_ context.Context, ownerSub string) ([]*domain.Attachment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []*domain.Attachment
+	for _, a := range r.rows {
+		if a.OwnerID == ownerSub {
+			cp := *a
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
 var _ domain.AttachmentRepository = (*AttachmentRepo)(nil)

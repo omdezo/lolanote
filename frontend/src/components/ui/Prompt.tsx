@@ -2,6 +2,7 @@
 // dialogs (unstyled, focus-stealing, unthemeable), a portal-rendered modal
 // resolves a promise. Usage: `const url = await prompt({ title: 'Link' })`.
 import { create } from 'zustand';
+import { useT } from '../../i18n';
 
 interface PromptSpec {
   title: string;
@@ -37,10 +38,12 @@ export function confirm(title: string, confirmLabel = 'Confirm'): Promise<boolea
 }
 
 import { useEffect, useRef, useState } from 'react';
+import { Modal } from './Modal';
 import { CloseIcon } from '../Icons';
 
 export function PromptHost() {
   const { spec, close } = usePrompt();
+  const t = useT();
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
@@ -55,13 +58,17 @@ export function PromptHost() {
   const isConfirm = spec.kind === 'confirm';
 
   return (
-    <div className="modal-backdrop" onClick={() => close(null)} style={{ paddingTop: '18vh' }}>
-      <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>{spec.title}</h3>
-          <button className="panel-close" onClick={() => close(null)}><CloseIcon size={15} /></button>
-        </div>
-        <div className="modal-body">
+    <Modal
+      title={spec.title}
+      overlayId="prompt"
+      onClose={() => close(null)}
+      style={{ width: 420 }}
+      backdropStyle={{ paddingTop: '18vh' }}
+      headExtra={
+        <button className="panel-close" aria-label={t('common.close')} title={t('common.close')} onClick={() => close(null)}><CloseIcon size={15} /></button>
+      }
+    >
+      <div className="modal-body">
           {!isConfirm && (
             spec.multiline ? (
               <textarea
@@ -69,30 +76,36 @@ export function PromptHost() {
                 className="search-input"
                 dir="auto"
                 rows={3}
+                aria-label={spec.title}
                 placeholder={spec.placeholder}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
+                // Ctrl/⌘+Enter commits a multiline field; plain Enter is a
+                // newline, which is the whole reason it is multiline. Escape is
+                // handled on the container, which is why this branch never had
+                // one and the board's rules editor could not be closed at all.
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) close(value); }}
               />
             ) : (
               <input
                 ref={inputRef as React.RefObject<HTMLInputElement>}
                 className="search-input"
                 dir="auto"
+                aria-label={spec.title}
                 placeholder={spec.placeholder}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') close(value); if (e.key === 'Escape') close(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') close(value); }}
               />
             )
           )}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <button className="topbar-btn" onClick={() => close(null)}>Cancel</button>
-            <button className="topbar-btn primary" onClick={() => close(isConfirm ? 'yes' : value)}>
-              {spec.confirmLabel ?? 'OK'}
-            </button>
-          </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="topbar-btn" onClick={() => close(null)}>{t('common.cancel')}</button>
+          <button className="topbar-btn primary" onClick={() => close(isConfirm ? 'yes' : value)}>
+            {spec.confirmLabel ?? t('common.ok')}
+          </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

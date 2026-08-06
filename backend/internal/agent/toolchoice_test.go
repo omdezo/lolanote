@@ -3,8 +3,6 @@ package agent_test
 import (
 	"context"
 	"fmt"
-	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -184,7 +182,7 @@ func TestAudit_ListsOnlyRunsThatChangedSomething(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	h.awaitState(t, applied.ID, agent.StateProposed)
-	if _, err := h.svc.Apply(ctx, h.principal, applied.ID, nil); err != nil {
+	if _, err := h.svc.Apply(ctx, h.principal, applied.ID, nil, nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -223,42 +221,70 @@ func TestAudit_ListsOnlyRunsThatChangedSomething(t *testing.T) {
 // This shipped for real: eleven tools, including all of vision, composition and
 // repair, were implemented and absent from the catalogue.
 func TestToolCatalogue_OffersEveryImplementedTool(t *testing.T) {
-	source, err := os.ReadFile("tools.go")
-	if err != nil {
-		t.Fatalf("read tools.go: %v", err)
+	// Both sides are read at RUNTIME. The old version scraped `case toolX:` out
+	// of tools.go with a regex, which meant the guard silently stopped guarding
+	// the moment the dispatch stopped being a switch.
+	implemented := agent.ImplementedToolNames()
+	if len(implemented) == 0 {
+		t.Fatal("the dispatch table is empty")
 	}
-	src := string(source)
 
-	// Implemented: every `case toolX:` in the execute switch.
-	implemented := map[string]bool{}
-	for _, m := range regexp.MustCompile(`(?m)^\tcase (tool[A-Za-z]+)`).FindAllStringSubmatch(src, -1) {
-		implemented[m[1]] = true
-	}
-	// Offered: every `Name: toolX` in the catalogue.
 	offered := map[string]bool{}
-	for _, m := range regexp.MustCompile(`Name:\s+(tool[A-Za-z]+)`).FindAllStringSubmatch(src, -1) {
-		offered[m[1]] = true
+	for _, def := range agent.ToolCatalogue(true, true) {
+		offered[def.Name] = true
 	}
 
-	if len(implemented) == 0 || len(offered) == 0 {
-		t.Fatal("could not parse the tool surface; this test needs updating alongside tools.go")
-	}
-	var missing []string
-	for name := range implemented {
+	var unreachable []string
+	for _, name := range implemented {
 		if !offered[name] {
-			missing = append(missing, name)
+			unreachable = append(unreachable, name)
 		}
 	}
-	sort.Strings(missing)
-	if len(missing) > 0 {
-		t.Errorf("%d tool(s) are implemented but never offered to the model: %s",
-			len(missing), strings.Join(missing, ", "))
+	sort.Strings(unreachable)
+	if len(unreachable) > 0 {
+		t.Errorf("%d tool(s) are implemented but never offered to the model, which is "+
+			"indistinguishable from never having built them: %s",
+			len(unreachable), strings.Join(unreachable, ", "))
 	}
 
-	// And the catalogue actually built at runtime must be non-trivial, so a
-	// refactor that empties it fails here rather than in production.
-	if n := len(agent.ToolCatalogue(true, true)); n < len(implemented)-2 {
-		t.Errorf("the built catalogue offers %d tools; %d are implemented", n, len(implemented))
+	// And the other direction: a tool the model is told about but that nothing
+	// answers fails at the worst possible moment — mid-run, having already
+	// spent the tokens to decide to call it.
+	var unanswered []string
+	has := map[string]bool{}
+	for _, name := range implemented {
+		has[name] = true
+	}
+	for name := range offered {
+		if !has[name] {
+			unanswered = append(unanswered, name)
+		}
+	}
+	sort.Strings(unanswered)
+	if len(unanswered) > 0 {
+		t.Errorf("%d tool(s) are offered to the model with no handler: %s",
+			len(unanswered), strings.Join(unanswered, ", "))
+	}
+}
+
+// The gates are real gates: a run that may not delete must not be shown the
+// delete tool, whatever the rest of the catalogue says.
+func TestToolCatalogue_HonoursItsGates(t *testing.T) {
+	names := func(allowDelete, allowLabels bool) map[string]bool {
+		out := map[string]bool{}
+		for _, d := range agent.ToolCatalogue(allowDelete, allowLabels) {
+			out[d.Name] = true
+		}
+		return out
+	}
+	full, bare := names(true, true), names(false, false)
+	if len(bare) >= len(full) {
+		t.Fatalf("gating changed nothing: %d vs %d tools", len(bare), len(full))
+	}
+	for name := range bare {
+		if !full[name] {
+			t.Errorf("tool %q appears only when gates are OFF", name)
+		}
 	}
 }
 

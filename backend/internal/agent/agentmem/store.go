@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"qomranote/backend/internal/agent"
 	"qomranote/backend/internal/domain"
@@ -43,6 +44,22 @@ func cloneRun(r *agent.Run) *agent.Run {
 		cp.Verdict = &v
 	}
 	cp.TransactionIDs = append([]string(nil), r.TransactionIDs...)
+	cp.RevertedElementIDs = append([]string(nil), r.RevertedElementIDs...)
+	// The timing maps are copied, not aliased. A store that hands back a map the
+	// caller can still write through is not a store — a test asserting "the
+	// stamp was persisted" would pass on a mutation that never reached it.
+	if r.StateAt != nil {
+		cp.StateAt = make(map[agent.RunState]time.Time, len(r.StateAt))
+		for k, v := range r.StateAt {
+			cp.StateAt[k] = v
+		}
+	}
+	if r.RevertedAt != nil {
+		cp.RevertedAt = make(map[string]time.Time, len(r.RevertedAt))
+		for k, v := range r.RevertedAt {
+			cp.RevertedAt[k] = v
+		}
+	}
 	return &cp
 }
 
@@ -189,9 +206,46 @@ func (r *EventRepo) List(_ context.Context, runID string, since int64, limit int
 	return out, nil
 }
 
-// DeleteByTenant is a no-op here: the in-memory journal is per-test and does
-// not carry a tenant index. The Mongo adapter implements the real purge.
-func (r *EventRepo) DeleteByTenant(_ context.Context, _ string) error { return nil }
+// Aggregate groups events by type over a window, mirroring the Mongo `$group`
+// so a test can assert on the same numbers a dashboard would read.
+func (r *EventRepo) Aggregate(_ context.Context, tenant string, since time.Time, types []agent.EventType) (map[agent.EventType]int64, error) {
+	want := map[agent.EventType]bool{}
+	for _, t := range types {
+		want[t] = true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := map[agent.EventType]int64{}
+	for _, ev := range r.items {
+		if ev.At.Before(since) {
+			continue
+		}
+		if tenant != "" && ev.Tenant != tenant {
+			continue
+		}
+		if len(want) > 0 && !want[ev.Type] {
+			continue
+		}
+		out[ev.Type]++
+	}
+	return out, nil
+}
+
+// DeleteByTenant drops one tenant's rows. It used to be a no-op on the grounds
+// that the in-memory journal carried no tenant; it carries one now, so the
+// adapter can honour the same contract the Mongo one does.
+func (r *EventRepo) DeleteByTenant(_ context.Context, tenant string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.items[:0]
+	for _, ev := range r.items {
+		if ev.Tenant != tenant {
+			kept = append(kept, ev)
+		}
+	}
+	r.items = kept
+	return nil
+}
 
 // All returns every recorded event, for assertions.
 func (r *EventRepo) All() []*agent.Event {

@@ -16,6 +16,7 @@ import Underline from '@tiptap/extension-underline';
 import type { QElement } from '../../api/types';
 import { t } from '../../i18n';
 import { cycleDir, elementDir, smartDigitsTextInput, type TextDirection } from '../../lib/direction';
+import { toTextPreview } from '../../lib/textPreview';
 import { sendEditing } from '../../realtime/socket';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { useView } from '../../store/viewStore';
@@ -57,7 +58,7 @@ export function NoteCard({ element, cloneShellId }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Placeholder.configure({ placeholder: isHeading ? 'Heading' : 'Write something…' }),
+      Placeholder.configure({ placeholder: isHeading ? t('tool.heading') : t('note.write') }),
       Link.configure({ openOnClick: false, autolink: true }),
       TextStyle,
       Color,
@@ -74,7 +75,7 @@ export function NoteCard({ element, cloneShellId }: Props) {
       setEditing(false);
       sendEditing(element.id, false);
       const doc = editor.getJSON();
-      const textPreview = editor.getText().slice(0, 500);
+      const textPreview = toTextPreview(editor.getText());
       const prev = JSON.stringify(element.content?.doc ?? null);
       if (JSON.stringify(doc) !== prev) {
         void commitTransaction([updateOp(element, { content: { doc, textPreview } })]);
@@ -139,8 +140,8 @@ export function NoteCard({ element, cloneShellId }: Props) {
       )}
       <EditorContent editor={editor} />
       {cloneShellId && (
-        <div className="clone-footer" title="This note is synced — edits update every copy">
-          <SyncIcon size={11} /> synced note
+        <div className="clone-footer" title={t('canvas.syncedHint')}>
+          <SyncIcon size={11} /> {t('canvas.syncedNote')}
         </div>
       )}
     </div>
@@ -180,7 +181,7 @@ function FormatBar({ editor, dir, onCycleDir, noteColor, onNoteColor }: {
 
   const setLink = async () => {
     const prev = editor.getAttributes('link').href as string | undefined;
-    const url = await prompt({ title: 'Link text to…', placeholder: 'https://…', defaultValue: prev ?? '', confirmLabel: 'Link' });
+    const url = await prompt({ title: t('dlg.linkTo'), placeholder: t('dlg.linkUrl'), defaultValue: prev ?? '', confirmLabel: t('dlg.link') });
     if (url === null) return;
     if (!url.trim()) { c().unsetLink().run(); return; }
     const href = /^https?:\/\//.test(url.trim()) ? url.trim() : `https://${url.trim()}`;

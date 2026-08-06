@@ -5,6 +5,7 @@
 // polite toast before the re-login redirect instead of a hard failure.
 import Keycloak from 'keycloak-js';
 import { toast } from '../components/ui/Toaster';
+import { clearLocalData } from '../lib/boardCache';
 
 // Same-origin by default. The served bundle is baked at build time, so a
 // hard-coded host is wrong the moment the app is reached by anything other
@@ -109,9 +110,25 @@ export async function forceRefreshToken(): Promise<string> {
   return keycloak.token ?? '';
 }
 
-export function logout() {
+/**
+ * Sign out, and take the local copy with you.
+ *
+ * Tokens have always lived in memory only — and the boards did not. The
+ * IndexedDB mirror kept up to fourteen days of full board content, and the
+ * function written to clear it was never called from anywhere. Awaited before
+ * the redirect, because the navigation kills the transaction otherwise, and the
+ * whole point is that it has finished before the next person sits down.
+ */
+export async function logout(): Promise<void> {
+  await clearLocalData();
   keycloak.logout({ redirectUri: window.location.origin });
 }
+
+// The same residue survives a sign-out that happened somewhere else — another
+// tab, another device, "sign me out everywhere", an idle timeout. Those paths
+// never reach logout() above, so the clear is hung on the adapter's own event
+// as well: whichever way the session ends, the device is left clean.
+keycloak.onAuthLogout = () => { void clearLocalData(); };
 
 export function currentSub(): string {
   return keycloak.subject ?? '';

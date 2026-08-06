@@ -14,15 +14,21 @@ import (
 // with its breadcrumb path (§3.2), its children (the core query, §9.4), the
 // Unsorted tray (§3.3), search (§3.5), templates (§5), and export (§7.2).
 type BoardService struct {
-	elements domain.ElementRepository
-	users    domain.UserRepository
-	access   *AccessResolver
+	elements    domain.ElementRepository
+	users       domain.UserRepository
+	access      *AccessResolver
+	attachments domain.AttachmentRepository // optional: the export's file manifest
 }
 
 // NewBoardService constructs the service.
 func NewBoardService(elements domain.ElementRepository, users domain.UserRepository, access *AccessResolver) *BoardService {
 	return &BoardService{elements: elements, users: users, access: access}
 }
+
+// AttachAttachments lets an export name the files it refers to. Optional: with
+// no attachment store the export still strips the credentials, it just cannot
+// say what the files were called.
+func (s *BoardService) AttachAttachments(a domain.AttachmentRepository) { s.attachments = a }
 
 // BoardView is everything the client needs to open a board.
 type BoardView struct {
@@ -66,19 +72,22 @@ func (s *BoardService) Get(ctx context.Context, p *domain.Principal, boardID str
 		crumbs[i], crumbs[j] = crumbs[j], crumbs[i]
 	}
 
-	return &BoardView{Board: board, Breadcrumb: crumbs, Role: roleName(role)}, nil
+	return &BoardView{Board: redact(board, role), Breadcrumb: crumbs, Role: roleName(role)}, nil
 }
 
 // Children returns every live element on the board's canvas plus the
 // contents of its columns/task lists — one payload renders the whole board.
 func (s *BoardService) Children(ctx context.Context, p *domain.Principal, boardID string) ([]*domain.Element, error) {
-	if _, _, err := s.access.RequireView(ctx, boardID, p); err != nil {
+	role, _, err := s.access.RequireView(ctx, boardID, p)
+	if err != nil {
 		return nil, err
 	}
 	direct, err := s.elements.Children(ctx, domain.ElementFilter{ParentID: boardID})
 	if err != nil {
 		return nil, err
 	}
+	// Nested boards carry their OWN ACL, so this payload used to hand a viewer
+	// every sub-board's share tokens along with the top one's.
 	out := make([]*domain.Element, 0, len(direct))
 	var containerIDs []string
 	for _, el := range direct {
@@ -130,7 +139,7 @@ func (s *BoardService) Children(ctx context.Context, p *domain.Principal, boardI
 			out = append(out, src)
 		}
 	}
-	return out, nil
+	return redactAll(out, role), nil
 }
 
 // ChildBoardStats returns per-child-board content counts for board tiles
@@ -155,12 +164,17 @@ func (s *BoardService) ChildBoardStats(ctx context.Context, p *domain.Principal,
 // Unsorted returns the board's capture tray, ordered (§3.3). Everyone with
 // board access — including read-only viewers — can see it.
 func (s *BoardService) Unsorted(ctx context.Context, p *domain.Principal, boardID string) ([]*domain.Element, error) {
-	if _, _, err := s.access.RequireView(ctx, boardID, p); err != nil {
+	role, _, err := s.access.RequireView(ctx, boardID, p)
+	if err != nil {
 		return nil, err
 	}
-	return s.elements.Children(ctx, domain.ElementFilter{
+	tray, err := s.elements.Children(ctx, domain.ElementFilter{
 		ParentID: boardID, Section: domain.SectionUnsorted,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return redactAll(tray, role), nil
 }
 
 // Search spans the caller's reachable content; sortable by last modified (§3.5).
@@ -169,7 +183,14 @@ func (s *BoardService) Search(ctx context.Context, p *domain.Principal, query st
 	if query == "" {
 		return []*domain.Element{}, nil
 	}
-	return s.elements.Search(ctx, p.Sub, query, limit)
+	hits, err := s.elements.Search(ctx, p.Sub, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	// Search spans boards held at every role, and resolving each hit's own role
+	// would be a walk per result. The lower bound is the honest one here: a
+	// result list needs the owner to render, never a member list.
+	return redactAll(hits, RoleView), nil
 }
 
 // Templates lists boards flagged as templates: the caller's own plus the
@@ -183,12 +204,16 @@ func (s *BoardService) Templates(ctx context.Context, p *domain.Principal) ([]*d
 	if err != nil {
 		return nil, err
 	}
-	return append(mine, system...), nil
+	return redactAll(append(mine, system...), RoleEdit), nil
 }
 
 // Boards lists the boards a user owns or edits (share pickers, move targets).
 func (s *BoardService) Boards(ctx context.Context, p *domain.Principal) ([]*domain.Element, error) {
-	return s.elements.BoardsOwnedBy(ctx, p.Sub, false)
+	boards, err := s.elements.BoardsOwnedBy(ctx, p.Sub, false)
+	if err != nil {
+		return nil, err
+	}
+	return redactAll(boards, RoleEdit), nil
 }
 
 // ---- Export (§7.2): linearized markdown / plain text / JSON ----
@@ -202,18 +227,34 @@ func (s *BoardService) Export(ctx context.Context, p *domain.Principal, boardID,
 	if isHome(board) {
 		return "", "", domain.ErrHomeBoard
 	}
-	if _, _, err := s.access.RequireView(ctx, boardID, p); err != nil {
+	role, _, err := s.access.RequireView(ctx, boardID, p)
+	if err != nil {
 		return "", "", err
 	}
 
 	// JSON: the full raw subtree — lossless, machine-readable.
 	if format == "json" {
-		descendants, err := s.elements.Descendants(ctx, board.ID, false)
+		// Bounded, and refusing rather than truncating: an archive that stops
+		// silently looks complete, which is the worst thing an archive can be.
+		descendants, err := subtreeOf(ctx, s.elements, board.ID, false)
 		if err != nil {
 			return "", "", err
 		}
+		// "Lossless" was over-inclusive in the one field that must never leave
+		// the owner: this route is in the optional-auth group, so a read-only
+		// link plus ?format=json was a complete view-to-edit escalation.
+		//
+		// It was over-inclusive in a second: content.url carried a presigned
+		// AWS SigV4 URL — a bearer credential for direct bucket access that
+		// bypasses the application and stays valid for seven days after the
+		// share it came with is revoked. An export is an archive, so the files
+		// become a manifest of what they ARE and the id that resolves them
+		// through the ACL-checked blob route.
+		files := attachmentManifest(ctx, s.attachments, descendants)
+		stripCredentialURLs(descendants)
 		payload, err := json.MarshalIndent(map[string]any{
-			"board": board, "elements": descendants,
+			"board": redact(board, role), "elements": redactAll(descendants, role),
+			"attachments": files,
 		}, "", "  ")
 		if err != nil {
 			return "", "", err
@@ -259,12 +300,34 @@ func (s *BoardService) renderBoard(ctx context.Context, b *strings.Builder, boar
 	return nil
 }
 
+// exportBodyOf is the real text of a note or document, in preference order:
+// the rich document itself, the derived search body, and only then the preview.
+//
+// The preview is last because it is a preview. An export built from it shipped
+// the first 500 characters of every document with nothing saying so.
+func exportBodyOf(el *domain.Element) string {
+	if doc, ok := el.Content["doc"]; ok && doc != nil {
+		if txt := domain.PlainTextOf(doc); txt != "" {
+			return txt
+		}
+	}
+	if txt, _ := el.Content["searchText"].(string); txt != "" {
+		return txt
+	}
+	txt, _ := el.Content["textPreview"].(string)
+	return txt
+}
+
 func (s *BoardService) renderElement(ctx context.Context, b *strings.Builder, el *domain.Element, depth int, format string) {
 	switch el.Type {
 	case domain.TypeBoard:
 		_ = s.renderBoard(ctx, b, el, depth+1, format)
 	case domain.TypeCard, domain.TypeDocument:
-		if txt, ok := el.Content["textPreview"].(string); ok && txt != "" {
+		// The whole document, not its first 500 characters. This read
+		// textPreview, so the markdown you sent a producer contained a stub of
+		// every document — no ellipsis, no warning, and the full text sitting on
+		// the server the whole time, read by exactly one consumer: the editor.
+		if txt := exportBodyOf(el); txt != "" {
 			fmt.Fprintf(b, "%s\n\n", txt)
 		}
 	case domain.TypeLink:

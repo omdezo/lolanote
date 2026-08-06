@@ -2,11 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) resolve to
+         anything at all, and without it the agent pill sits under a notched
+         iPhone's home indicator. interactive-widget=resizes-content makes
+         Android's keyboard behave the way the visualViewport listener in
+         lib/keyboardInset.ts already assumes, so the two platforms agree. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>QomraNote — Get organized. Stay creative.</title>
     <link rel="icon" href="/icon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#5e5ce6" />
+    <!-- MO10. iOS Safari ignores manifest icons entirely. Without this link,
+         Add-to-Home-Screen took a SCREENSHOT OF THE PAGE and used that as the
+         app icon — so an installed QomraNote on an iPhone was identified by a
+         thumbnail of whatever board happened to be open when it was installed.
+         The three apple-mobile-web-app-* metas are the rest of the same story:
+         without them the "installed" app opens inside Safari chrome, which is
+         the one thing installing it was supposed to change. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="QomraNote" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body>
     <div id="root"></div>

@@ -26,7 +26,7 @@
 .ghost-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 6px; }
 
 .ghost-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
   color: var(--ink);
   padding: 2px 4px;
@@ -49,14 +49,14 @@
   border-radius: 6px;
   padding: 2px 5px;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 650;
   color: var(--ink);
 }
-.ghost-title-input:focus { outline: none; }
+
 
 .ghost-count {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--accent);
   background: var(--accent-tint);
   border-radius: var(--r-pill);
@@ -72,10 +72,10 @@
   color: var(--ink-3);
   flex: none;
 }
-.ghost-dissolve:hover { background: var(--danger-tint); color: var(--danger); }
+.ghost-dissolve:hover { background: var(--danger-tint); color: var(--danger-text); }
 
 .ghost-why {
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   color: var(--ink-3);
   line-height: 1.45;
   padding: 0 4px 7px;
@@ -95,7 +95,7 @@
   background: var(--surface);
   border-radius: 7px;
   padding: 6px 7px 6px 9px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-2);
   box-shadow: var(--shadow-1);
   cursor: grab;
@@ -113,16 +113,48 @@
   border-radius: 5px;
   display: flex; align-items: center; justify-content: center;
   color: var(--ink-3);
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity 0.12s var(--ease);
   flex: none;
+  position: relative;
 }
-.ghost-chip:hover .ghost-chip-x { opacity: 1; }
+.ghost-chip:hover .ghost-chip-x,
+.ghost-chip:focus-within .ghost-chip-x,
+.ghost-chip-x:focus-visible { opacity: 1; }
 .ghost-chip-x:hover { background: var(--hover-strong); color: var(--ink); }
 
 /* Cards the proposal would move dim in place instead of jumping, so the board
-   still reads as the user's own until they accept. */
-.el.agent-proposed { opacity: 0.38; transition: opacity 0.24s var(--ease); }
+   still reads as the user's own until they accept.
+
+   AX17, WCAG 1.4.1. 0.38 was the ENTIRE signal — no aria, no icon, no border,
+   no text — on the highest-stakes review in the product, the cards about to go
+   to the trash. And the second-order effect was worse than the first: opacity
+   multiplies through to the card's own text, so --ink at 16.8:1 landed near
+   3.3:1 and the person was asked to read and approve content the preview had
+   made hard to read. 0.62 keeps the ambient "in play" reading; the dashed
+   border carries the rest and matches the ghost treatment, so a proposal looks
+   like a proposal in both layers; and `.el-pending` says which action it is. */
+/* The dim is applied to the card's CONTENTS rather than to the card, because
+   opacity establishes a group: a child cannot be more opaque than its parent,
+   so a badge inside a 0.62 shell would have been dimmed by the very thing it
+   exists to compensate for. */
+.el.agent-proposed {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+}
+.el.agent-proposed > *:not(.el-pending) {
+  opacity: 0.62;
+  transition: opacity 0.24s var(--ease);
+}
+.el-pending {
+  position: absolute; top: -11px; inset-inline-start: 8px; z-index: 3;
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--accent); color: #fff;
+  font-size: 0.625rem; font-weight: 700;
+  letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap;
+}
+.el-pending.danger { background: var(--danger-text); }
 
 /* ---- entry points ---------------------------------------------------- */
 
@@ -137,7 +169,7 @@
   margin-bottom: 10px;
   padding: 9px;
   border-radius: 9px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 550;
   color: var(--accent);
   background: var(--accent-tint);
@@ -155,8 +187,8 @@
    leaves them no way forward. */
 .boot-error {
   margin-top: 14px;
-  font-size: 13px;
-  color: var(--danger);
+  font-size: 0.8125rem;
+  color: var(--danger-text);
   max-width: 320px;
   text-align: center;
   line-height: 1.5;
@@ -165,7 +197,7 @@
   margin-top: 14px;
   padding: 8px 18px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   background: var(--accent);
   color: #fff;
@@ -183,16 +215,16 @@
   border-radius: 9px;
   padding: 10px 11px;
   font: inherit;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   line-height: 1.5;
   color: var(--ink);
 }
-.ac-intent:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.ac-intent:focus { box-shadow: 0 0 0 2px var(--accent); }
 .ac-intent::placeholder { color: var(--ink-3); }
 
 .ac-presets { display: flex; flex-wrap: wrap; gap: 5px; }
 .ac-preset {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   color: var(--ink-2);
   background: var(--hover);
   border-radius: var(--r-pill);
@@ -205,12 +237,12 @@
 
 .ap-intent {
   margin-top: 9px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-3);
   font-style: italic;
   line-height: 1.45;
 }
-.ap-working { margin-top: 11px; font-size: 12.5px; color: var(--ink); }
+.ap-working { margin-top: 11px; font-size: 0.78125rem; color: var(--ink); }
 
 .ap-plan {
   list-style: none;
@@ -229,16 +261,16 @@
   gap: 6px;
   padding: 5px 6px 5px 8px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .ap-row:hover { background: var(--hover); }
 .ap-row.dropped { opacity: 0.4; }
 .ap-row.dropped .ap-row-text { text-decoration: line-through; }
-.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger-text); }
 
 .ap-kind {
   flex: none;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--accent);
@@ -271,24 +303,31 @@
   border-radius: 6px;
   padding: 2px 6px;
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink);
 }
-.ap-row-input:focus { outline: none; }
 
+
+/* See agent-bar.css for why this is 0.45 and not 0: a control that is invisible
+ * until hovered does not exist on a touch device and fails 2.4.11 on a
+ * keyboard, and this one drops or restores an agent action. */
 .ap-row-x {
   flex: none;
   width: 18px; height: 18px;
   border-radius: 5px;
   display: flex; align-items: center; justify-content: center;
   color: var(--ink-3);
-  font-size: 11px;
-  opacity: 0;
+  font-size: 0.6875rem;
+  opacity: 0.45;
+  position: relative;
 }
-.ap-row:hover .ap-row-x, .ap-row.dropped .ap-row-x { opacity: 1; }
+.ap-row:hover .ap-row-x,
+.ap-row:focus-within .ap-row-x,
+.ap-row-x:focus-visible,
+.ap-row.dropped .ap-row-x { opacity: 1; }
 .ap-row-x:hover { background: var(--hover-strong); color: var(--ink); }
 
-.adb-text em.danger { color: var(--danger); }
+.adb-text em.danger { color: var(--danger-text); }
 
 /* ---- ghost elements on the canvas ------------------------------------ */
 
@@ -305,7 +344,7 @@
 
 .ghost-el-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .ghost-kind {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 650;
   color: var(--accent);
   background: var(--accent-tint);
@@ -313,12 +352,12 @@
   padding: 1px 6px;
 }
 .ghost-el .ghost-count {
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   color: var(--ink-3);
   margin-inline-start: auto;
 }
 .ghost-el-body {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   color: var(--ink);
   line-height: 1.4;
   display: -webkit-box;
@@ -326,4 +365,100 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.ghost-task { font-size: 11.5px; color: var(--ink-2); margin-top: 3px; }
+.ghost-task { font-size: 0.71875rem; color: var(--ink-2); margin-top: 3px; }
+
+/* ---- what a plan is putting inside an existing board tile ---------------
+   A coordinate computed for another canvas cannot be drawn here, and a nested
+   board's tile is ordinary board content this layer never draws — so a plan
+   filing thirty elements into sub-boards previewed as untouched rectangles and
+   a text list. The badge is the honest depth preview: the count, on the tile,
+   with no pretence of rendering a canvas that is not this one.
+
+   The frame is inert on purpose. It covers the whole tile, and a tile you can
+   no longer open while a plan is pending would be a worse review than none. */
+.ghost-badge {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 6px;
+  border-radius: var(--r-card);
+  border: 1.5px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  transition: background 0.16s var(--ease);
+}
+.ghost-badge.hot { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+/* Still being decided (IN12): the count is climbing as the run stages actions,
+   and the softer frame says this is not yet something to approve. A run used to
+   be an opaque wait followed by a wall of ghosts; seeing the first few land in
+   the wrong board is what makes cancelling at second five possible. */
+.ghost-badge.streaming {
+  border-style: dotted;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.ghost-badge > .ghost-count {
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+}
+
+/* ---- what is going inside a proposed container -------------------------
+   The review's whole job at this point is answering "which card went where".
+   A count could not answer it: four rectangles labelled "12 inside" is not a
+   preview of filing, it is a preview of arithmetic. */
+.ghost-contents {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--hairline);
+}
+.ghost-child {
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-radius: 5px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.14s var(--ease), color 0.14s var(--ease);
+}
+/* Lit from either end: hovering the card here highlights its row in the list,
+   and hovering the row highlights the card. */
+.ghost-child.hot {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.ghost-child.more {
+  background: transparent;
+  color: var(--ink-3);
+  padding-inline-start: 2px;
+}
+
+/* ---- the arrows -------------------------------------------------------
+   Connect actions have no coordinate of their own, so the server's layout pass
+   skips them and this layer — which draws only what carries a position —
+   filtered them out. A capability whose whole point is the relationships
+   previewed as loose boxes with the relationships missing. */
+.ghost-lines {
+  position: absolute;
+  left: 0; top: 0;
+  width: 100%; height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--accent);
+}
+.ghost-line {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  /* Dashed, like every other ghost: unmistakably a proposal. */
+  stroke-dasharray: 6 5;
+  opacity: 0.75;
+  transition: opacity 0.14s var(--ease), stroke-width 0.14s var(--ease);
+}
+.ghost-line.hot { opacity: 1; stroke-width: 2.6; }

@@ -15,6 +15,16 @@ function base({ size = 20, ...rest }: P) {
     strokeWidth: 1.7,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
+    // Every glyph in this file is decoration sitting inside a control that
+    // carries the meaning. Without these two attributes ~40 icon-only buttons
+    // computed an EMPTY accessible name — a screen reader read the product's
+    // toolbar as "button, button, button" — and the SVG itself was a tab stop
+    // in IE-era focus order. The one correct SVG in the codebase was a local
+    // throwaway in AgentAsk that carried aria-hidden by hand; putting it here
+    // is the same fix at forty sites. Callers that genuinely draw meaning with
+    // an icon (none today) override via the spread below.
+    'aria-hidden': true,
+    focusable: 'false' as const,
     ...rest,
   };
 }
@@ -80,6 +90,12 @@ export const UploadIcon = (p: P) => (
 );
 export const DrawIcon = (p: P) => (
   <svg {...base(p)}><path d="m14.5 5.5 4 4L8 20l-4.6.6L4 16 14.5 5.5Z" /><path d="m12.5 7.5 4 4" /></svg>
+);
+// Rubber-band select. Only ever rendered on a coarse pointer, where MO2 moved
+// marquee off the one-finger drag and onto a mode of its own: a dashed frame
+// with corner handles is the shape every canvas app draws for this.
+export const MarqueeIcon = (p: P) => (
+  <svg {...base(p)}><path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H8M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8M20 16v1.5a2.5 2.5 0 0 1-2.5 2.5H16M8 20H6.5A2.5 2.5 0 0 1 4 17.5V16" /><path d="M11 4h2M11 20h2M4 11v2M20 11v2" /></svg>
 );
 export const TrashIcon = (p: P) => (
   <svg {...base(p)}><path d="M5 7h14M10 4.5h4M8.5 7l.7 12a1.6 1.6 0 0 0 1.6 1.5h2.4a1.6 1.6 0 0 0 1.6-1.5L15.5 7" /><path d="M10.2 10.5v6M13.8 10.5v6" /></svg>
@@ -200,6 +216,12 @@ export const GlobeIcon = (p: P) => (
 );
 export const ShieldIcon = (p: P) => (
   <svg {...base(p)}><path d="M12 4.2 5.8 6.6v4.6c0 4 2.5 6.9 6.2 8.6 3.7-1.7 6.2-4.6 6.2-8.6V6.6L12 4.2Z" /><path d="m9.3 12 1.9 1.9 3.5-3.6" /></svg>
+);
+// The universal access mark: a figure with arms out inside a ring. Settings
+// grew an Accessibility tab (AX30) and there was no glyph for the one concept
+// the product had never named.
+export const AccessIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="8.2" /><circle cx="12" cy="7.6" r="1.15" fill="currentColor" stroke="none" /><path d="M7.8 10.1h8.4M12 10.6v3.4M12 14l-1.9 4M12 14l1.9 4" /></svg>
 );
 export const RailIcon = (p: P) => (
   <svg {...base(p)}><rect x="4" y="4.5" width="16" height="15" rx="2.5" /><path d="M9.2 4.5v15" /><path d="M6.6 8h0M6.6 11h0M6.6 14h0" strokeWidth="2.1" /></svg>

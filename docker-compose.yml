@@ -9,12 +9,36 @@ services:
   mongo:
     image: mongo:7
     container_name: qomranote-mongo
+    # A ONE-NODE REPLICA SET, not a cluster. Standalone mongod has no oplog and
+    # no multi-document transactions, so the write path compensates by hand and
+    # a backup's recovery point is the last dump. --replSet buys both back at
+    # one node; --bind_ip_all because the loopback default would refuse the
+    # docker network.
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
-      - "27017:27017"
+      # LOOPBACK ONLY. This ran as "27017:27017", which publishes on every
+      # interface — and the database has no credential at all: no
+      # MONGO_INITDB_ROOT_* pair here, and the API connects over a bare
+      # mongodb://mongo:27017. Anything that could reach this host on 27017 had
+      # full read and write over every board, with nothing to bypass.
+      #
+      # Binding to 127.0.0.1 removes the reachability without touching the data.
+      # It is half the fix: the port is closed, the database is still open to
+      # anything already on this machine. Turning on real auth means creating a
+      # root user INSIDE the existing volume — MONGO_INITDB_ROOT_* only fires on
+      # an empty data directory, so adding it here would silently do nothing —
+      # and that is a deliberate operational step, not a config edit.
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      # Self-initiating: rs.status() throws on a member that has never been
+      # configured, and the catch arm configures it. So the set comes up with
+      # the stack and no sidecar, and the check stays a plain liveness probe on
+      # every run after the first. The member host MUST be the compose service
+      # name — a set that names itself "localhost" is reachable only from
+      # inside this container.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try{rs.status().ok}catch(e){rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -78,8 +102,12 @@ services:
       APP_ENV: ${APP_ENV:-development}
       HTTP_ADDR: ":8080"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      MONGO_URI: mongodb://mongo:27017
+      # replicaSet= is what makes the driver discover a primary and open
+      # sessions; without it a client of a replica set still cannot start a
+      # transaction.
+      MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
       MONGO_DB: ${MONGO_DB:-qomranote}
+      MONGO_REPLICA_SET: rs0
       # Split horizon: tokens carry the browser-facing issuer; discovery goes
       # over the docker network.
       # PUBLIC_ORIGIN is the single address the browser uses — a LAN IP, a

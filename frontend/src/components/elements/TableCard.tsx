@@ -9,11 +9,13 @@ import type { QElement } from '../../api/types';
 import { dirAttr, elementDir, normalizeDigits } from '../../lib/direction';
 import { evaluateCell } from '../../lib/formula';
 import { updateOp, useBoard } from '../../store/boardStore';
+import { useT } from '../../i18n';
 import { MinusIcon, PlusIcon } from '../Icons';
 
 type Cells = string[][];
 
 export function TableCard({ element }: { element: QElement }) {
+  const t = useT();
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const selection = useBoard((s) => s.selection);
   const cells: Cells = normalize(element.content?.cells);
@@ -91,10 +93,10 @@ export function TableCard({ element }: { element: QElement }) {
       </table>
       {selected && (
         <div className="table-controls" onPointerDown={(e) => e.stopPropagation()}>
-          <button className="table-ctl" onClick={addRow}><PlusIcon size={12} /> Row</button>
-          <button className="table-ctl" onClick={addCol}><PlusIcon size={12} /> Column</button>
-          <button className="table-ctl" onClick={delRow}><MinusIcon size={12} /> Row</button>
-          <button className="table-ctl" onClick={delCol}><MinusIcon size={12} /> Column</button>
+          <button className="table-ctl" onClick={addRow}><PlusIcon size={12} /> {t('table.addRow')}</button>
+          <button className="table-ctl" onClick={addCol}><PlusIcon size={12} /> {t('table.addCol')}</button>
+          <button className="table-ctl" onClick={delRow}><MinusIcon size={12} /> {t('table.addRow')}</button>
+          <button className="table-ctl" onClick={delCol}><MinusIcon size={12} /> {t('table.addCol')}</button>
         </div>
       )}
     </div>

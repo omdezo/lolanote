@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, setSharePassword, setShareToken } from './api/client';
-import { initAuth, isAuthenticated } from './auth/keycloak';
+import { useT } from './i18n';
+import { currentSub, initAuth, isAuthenticated } from './auth/keycloak';
+import { setCacheOwner } from './lib/boardCache';
 import { connectBoard, disconnect } from './realtime/socket';
 import { useBoard } from './store/boardStore';
-import { useView } from './store/viewStore';
+import { navigateToBoard } from './store/navigation';
+import { getLastPointer, ownsEscape, useView } from './store/viewStore';
 import { BoardCanvas } from './canvas/BoardCanvas';
 import { Topbar } from './components/Topbar';
 import { Toolbar } from './components/Toolbar';
-import { UnsortedTray } from './components/panels/UnsortedTray';
+import { UnsortedTray, captureToUnsorted } from './components/panels/UnsortedTray';
 import { TrashPanel } from './components/panels/TrashPanel';
 import { SearchOverlay } from './components/panels/SearchOverlay';
 import { ShareDialog } from './components/panels/ShareDialog';
@@ -28,7 +31,11 @@ import { useAgent } from './agent/agentStore';
 
 export type PanelKind = 'none' | 'unsorted' | 'trash' | 'search' | 'share' | 'boards' | 'templates' | 'settings';
 
+/** This app's entry on the shared Escape stack (viewStore.overlays). */
+const PANEL_OVERLAY = 'panel';
+
 export default function App() {
+  const t = useT();
   const [booted, setBooted] = useState(false);
   const [bootError, setBootError] = useState('');
   const [panel, setPanel] = useState<PanelKind>('none');
@@ -37,6 +44,7 @@ export default function App() {
   const [welcome, setWelcome] = useState('');
   const { setUser, openBoard, readOnly, undo, redo } = useBoard();
   const boardId = useBoard((s) => s.boardId);
+  const boardTitle = useBoard((s) => s.boardTitle);
   const spellCheck = useSettings((s) => s.settings.preferences.spellCheck);
 
   // Open a shared board via its token; handle password-gated links.
@@ -82,11 +90,17 @@ export default function App() {
       if (share && sharedBoard) {
         await initAuth('optional'); // don't force login for public links
         if (cancelled) return;
+        setCacheOwner(currentSub()); // empty for an anonymous visitor, which is right
         await openShared(share, sharedBoard);
         return;
       }
 
       await initAuth('required');
+      // Before the first board is opened, so the local mirror is keyed to this
+      // account from the very first read: switching users on a shared machine
+      // must not paint the previous person's boards, even for the instant
+      // before reconcile.
+      setCacheOwner(currentSub());
       const me = await api.me();
       if (cancelled) return;
       setUser(me);
@@ -100,23 +114,42 @@ export default function App() {
       // only in the console. Surface it, so the state is legible and there is
       // a way out.
       console.error('boot failed', err);
-      if (!cancelled) setBootError(err?.message || 'Something went wrong while starting up.');
+      if (!cancelled) setBootError(err?.message || t('boot.error'));
     });
     return () => { cancelled = true; disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Board navigation: swap store contents and realtime room together.
+  //
+  // AX18. Opening another board replaces the entire canvas, so this is a page
+  // navigation in every sense except the URL — and it produced no title change,
+  // no focus change, no announcement, and landed in a document with no headings
+  // to orient by. Focus moves to the board heading once the swap resolves,
+  // which is what makes the announcement of the new board's name happen at all
+  // and what gives a keyboard user a defined place to be. `document.title` is
+  // set in the store, next to `boardTitle`, so the two cannot disagree.
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const navigate = useCallback(async (id: string) => {
-    await openBoard(id);
-    await connectBoard(id);
-  }, [openBoard]);
+    await navigateToBoard(id);
+    headingRef.current?.focus();
+  }, []);
 
   // Global keyboard map (§5): undo/redo, search, duplicate, mode escapes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const inEditor = (e.target as HTMLElement)?.closest?.('input, textarea, [contenteditable="true"]');
       const mod = e.ctrlKey || e.metaKey;
+      // Quick capture. It lived inside UnsortedTray, so the gesture documented
+      // as working "anywhere" unmounted with the panel: it fired only while the
+      // tray you were trying not to open was already open. The capture inbox is
+      // the thing a phone is for, and its gesture was the least reliable
+      // surface in the app.
+      if (mod && e.key === 'Enter' && !inEditor) {
+        e.preventDefault();
+        void captureToUnsorted();
+        return;
+      }
       if (mod && e.key.toLowerCase() === 'z' && !inEditor) {
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
@@ -149,6 +182,11 @@ export default function App() {
             .map((el) => el.id),
         );
       } else if (e.key === 'Escape') {
+        // Only when this panel is the innermost thing open. This listener and
+        // the agent shell's both sat on `window` with no propagation guard, so
+        // one Escape ran both: closing Search with a proposal pending also
+        // discarded the plan — paid for, unrecoverable, unannounced.
+        if (!ownsEscape(PANEL_OVERLAY)) return;
         setPanel('none');
         useView.getState().setDrawMode(false);
       }
@@ -156,6 +194,14 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
+
+  // The side panels take their turn on the overlay stack like every other
+  // dismissable surface, so whichever opened last is the one Escape closes.
+  useEffect(() => {
+    const v = useView.getState();
+    if (panel === 'none') v.popOverlay(PANEL_OVERLAY);
+    else v.pushOverlay(PANEL_OVERLAY);
+  }, [panel]);
 
   // Native paste (Ctrl/⌘+V outside editors): the ClipboardEvent hands us
   // files and text without permission prompts — screenshots and copied
@@ -165,7 +211,7 @@ export default function App() {
       const inEditor = (e.target as HTMLElement)?.closest?.('input, textarea, [contenteditable="true"]');
       if (inEditor || !e.clipboardData) return;
       e.preventDefault();
-      const pt = useView.getState().lastPointer;
+      const pt = getLastPointer();
       void pasteFromClipboardData(e.clipboardData, pt.x, pt.y);
     };
     window.addEventListener('paste', onPaste);
@@ -185,7 +231,7 @@ export default function App() {
   // A free, model-less check of whether this board wants tidying. Re-run per
   // board, never on a timer: a hint that reappears while you work is a nag.
   useEffect(() => {
-    if (booted && boardId) void useAgent.getState().loadDrift();
+    if (booted && boardId) void useAgent.getState().loadBoardState();
   }, [booted, boardId]);
 
   // Global hosts render regardless of view mode.
@@ -215,13 +261,13 @@ export default function App() {
         <div className="boot-title">Qomra<em>Note</em></div>
         {bootError ? (
           <>
-            <div className="boot-error">{bootError}</div>
-            <button className="boot-retry" onClick={() => window.location.reload()}>Try again</button>
+            <div className="boot-error" role="alert">{bootError}</div>
+            <button className="boot-retry" onClick={() => window.location.reload()}>{t('boot.retry')}</button>
           </>
         ) : (
           <>
             <div className="spinner" />
-            <div className="boot-sub">Get organized. Stay creative.</div>
+            <div className="boot-sub">{t('boot.tagline')}</div>
           </>
         )}
       </div>
@@ -239,12 +285,13 @@ export default function App() {
               <div className="brand-name">Qomra<em>Note</em></div>
             </div>
             {welcome && <div className="public-welcome">{welcome}</div>}
-            <div className="public-tag">Read-only</div>
+            <div className="public-tag">{t('boot.readOnly')}</div>
           </div>
           <div className="workspace">
-            <div className="canvas-region">
+            <main className="canvas-region" aria-labelledby="board-heading">
+              <h1 className="sr-only" id="board-heading">{boardTitle}</h1>
               <BoardCanvas navigate={navigate} />
-            </div>
+            </main>
           </div>
         </div>
         {hosts}
@@ -254,15 +301,28 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      {/* AX18. The document had no landmarks at all: zero <main>, zero
+          <header>, zero <h1>, and one <nav> (buried in Settings). "Go to the
+          top and start over" — the recovery every screen-reader user falls back
+          on — was not a usable recovery, because the top of this document had
+          nothing in it. Skip links first, so the first Tab from a fresh load
+          offers the canvas and the agent rather than eleven topbar buttons. */}
+      <a className="skip-link" href="#board-heading">{t('a11y.skipToBoard')}</a>
+      <a className="skip-link" href="#agent-shell-anchor">{t('a11y.skipToAgent')}</a>
       <div className="app" spellCheck={spellCheck}>
         <Topbar navigate={navigate} panel={panel} setPanel={setPanel} />
         <div className="workspace">
           {!readOnly && <Toolbar />}
-          <div className="canvas-region">
+          <main className="canvas-region" aria-labelledby="board-heading">
+            {/* The board's name as a real heading. It is the only h1 in the
+                document and it is where navigate() puts focus, so "what am I
+                looking at" has an answer that is spoken rather than painted.
+                tabIndex -1 because it is a focus target, not a tab stop. */}
+            <h1 className="sr-only" id="board-heading" ref={headingRef} tabIndex={-1}>{boardTitle}</h1>
             <BoardCanvas navigate={navigate} />
             {panel === 'unsorted' && <UnsortedTray onClose={() => setPanel('none')} />}
             {panel === 'trash' && <TrashPanel onClose={() => setPanel('none')} navigate={navigate} />}
-          </div>
+          </main>
           {panel === 'boards' && <BoardsDrawer onClose={() => setPanel('none')} navigate={navigate} />}
           {panel === 'search' && <SearchOverlay onClose={() => setPanel('none')} navigate={navigate} />}
           {panel === 'share' && boardId && <ShareDialog boardId={boardId} onClose={() => setPanel('none')} />}

@@ -3,43 +3,62 @@
 // notifications, Appearance, Preferences, Localization, Toolbar options,
 // Privacy) with a danger zone for account deletion. Every toggle writes
 // through the settings store (optimistic + debounced PATCH).
-import { useRef, useState } from 'react';
+import { createContext, useContext, useId, useRef, useState } from 'react';
 import { api, exportMyDataBlob, uploadFile } from '../../api/client';
 import type { UserSettings } from '../../api/types';
 import { logout } from '../../auth/keycloak';
 import { t, type TKey } from '../../i18n';
 import { useBoard } from '../../store/boardStore';
 import { useSettings } from '../../store/settingsStore';
+import { SHORTCUTS } from '../../lib/shortcuts';
+import { useDialog } from '../ui/Modal';
 import { toast } from '../ui/Toaster';
 import {
-  BellIcon, CheckIcon, CloseIcon, DownloadIcon, GlobeIcon, PaletteIcon,
-  RailIcon, ShieldIcon, SlidersIcon, UserIcon,
+  AccessIcon, BellIcon, CheckIcon, CloseIcon, DownloadIcon, GlobeIcon, PaletteIcon,
+  RailIcon, ShieldIcon, SlidersIcon, SparkleIcon, UserIcon,
   NoteIcon, LinkIcon, TodoIcon, LineIcon, BoardIcon, ColumnIcon, CommentIcon,
   TableIcon, SketchIcon, ColorIcon, DocumentIcon, AudioIcon, MapIcon,
   VideoIcon, HeadingIcon, ImageIcon, UploadIcon, DrawIcon,
 } from '../Icons';
 
-type Tab = 'account' | 'notifications' | 'appearance' | 'preferences' | 'localization' | 'toolbar' | 'privacy';
+type Tab = 'account' | 'notifications' | 'appearance' | 'accessibility' | 'preferences' | 'localization' | 'toolbar' | 'agent' | 'privacy';
 
 const TABS: Array<{ id: Tab; label: TKey; icon: JSX.Element }> = [
   { id: 'account', label: 'settings.account', icon: <UserIcon size={16} /> },
   { id: 'notifications', label: 'settings.notifications', icon: <BellIcon size={16} /> },
   { id: 'appearance', label: 'settings.appearance', icon: <PaletteIcon size={16} /> },
+  { id: 'accessibility', label: 'settings.accessibility', icon: <AccessIcon size={16} /> },
   { id: 'preferences', label: 'settings.preferences', icon: <SlidersIcon size={16} /> },
   { id: 'localization', label: 'settings.localization', icon: <GlobeIcon size={16} /> },
   { id: 'toolbar', label: 'settings.toolbar', icon: <RailIcon size={16} /> },
+  { id: 'agent', label: 'settings.agent', icon: <SparkleIcon size={16} /> },
   { id: 'privacy', label: 'settings.privacy', icon: <ShieldIcon size={16} /> },
 ];
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('account');
   const saveState = useSettings((s) => s.saveState);
+  const { boxRef, onKeyDown } = useDialog('settings-dialog', onClose);
+  const titleId = useId();
 
   return (
     <div className="modal-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal settings-modal" onPointerDown={(e) => e.stopPropagation()}>
+      {/* AX11: a real dialog — named, modal, trapped, restorable, Escape on the
+          container. It cannot use <Modal> because it is a two-column layout
+          with its own nav where the head row would be, so it takes the
+          behaviour without the chrome. */}
+      <div
+        ref={boxRef}
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <nav className="settings-nav">
-          <div className="settings-nav-title">{t('settings.title')}</div>
+          <div className="settings-nav-title" id={titleId}>{t('settings.title')}</div>
           {TABS.map((entry) => (
             <button
               key={entry.id}
@@ -53,22 +72,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <div className={`settings-save-state${saveState === 'error' ? ' error' : ''}`}>
             {saveState === 'saving' && t('common.saving')}
             {saveState === 'saved' && <><CheckIcon size={12} /> {t('common.saved')}</>}
-            {saveState === 'error' && 'Could not save'}
+            {saveState === 'error' && t('settings.saveFailed')}
           </div>
         </nav>
 
         <div className="settings-content">
           <div className="settings-content-head">
             <h2>{t(TABS.find((x) => x.id === tab)!.label)}</h2>
-            <button className="panel-close" onClick={onClose} title={t('common.close')}><CloseIcon size={16} /></button>
+            <button className="panel-close" onClick={onClose} aria-label={t('common.close')} title={t('common.close')}><CloseIcon size={16} /></button>
           </div>
           <div className="settings-body">
             {tab === 'account' && <AccountTab onDeleted={onClose} />}
             {tab === 'notifications' && <NotificationsTab />}
             {tab === 'appearance' && <AppearanceTab />}
+            {tab === 'accessibility' && <AccessibilityTab />}
             {tab === 'preferences' && <PreferencesTab />}
             {tab === 'localization' && <LocalizationTab />}
             {tab === 'toolbar' && <ToolbarTab />}
+            {tab === 'agent' && <AgentTab />}
             {tab === 'privacy' && <PrivacyTab />}
           </div>
         </div>
@@ -79,31 +100,88 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
 // ---- shared row primitives ----
 
+/**
+ * AX21. The one place in this product that reached for ARIA reached halfway.
+ *
+ * `<button role="switch" aria-checked={on} />` with NO accessible name, sixteen
+ * times — including `showEmailToOthers` and `showPresence`, which are privacy
+ * settings. The label was right there in a sibling `<div className="sr-label">`
+ * with no id and nothing pointing at it. A blind user could hear that sixteen
+ * switches existed and the state of each, and could not learn what any of them
+ * controlled. `role="switch"` without a name is strictly worse than a plain
+ * checkbox inside a `<label>`, which would have been correct with no ARIA at
+ * all.
+ *
+ * The fix is structural rather than per-call-site: `Row` already owns the label
+ * and the sub-line, so it mints ids for them and publishes them here. Every
+ * control inside a Row is named by its Row automatically, which is the only
+ * arrangement in which the seventeenth switch is also named.
+ */
+const RowLabel = createContext<{ labelId: string; subId?: string } | null>(null);
+
 function Row({ label, sub, children }: { label: string; sub?: string; children?: React.ReactNode }) {
+  const base = useId();
+  const labelId = `${base}-l`;
+  const subId = sub ? `${base}-s` : undefined;
   return (
-    <div className="settings-row">
-      <div className="sr-text">
-        <div className="sr-label">{label}</div>
-        {sub && <div className="sr-sub">{sub}</div>}
+    <RowLabel.Provider value={{ labelId, subId }}>
+      <div className="settings-row">
+        <div className="sr-text">
+          <div className="sr-label" id={labelId}>{label}</div>
+          {sub && <div className="sr-sub" id={subId}>{sub}</div>}
+        </div>
+        {children}
       </div>
-      {children}
-    </div>
+    </RowLabel.Provider>
   );
 }
 
 function Switch({ on, onChange }: { on: boolean; onChange: (next: boolean) => void }) {
-  return <button className={`switch${on ? ' on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />;
+  const named = useContext(RowLabel);
+  return (
+    <button
+      className={`switch${on ? ' on' : ''}`}
+      role="switch"
+      aria-checked={on}
+      aria-labelledby={named?.labelId}
+      aria-describedby={named?.subId}
+      onClick={() => onChange(!on)}
+    />
+  );
 }
 
+/**
+ * A choice among a few, which is a radio group and never was one: selection was
+ * conveyed by a CSS class alone, so every option announced identically and the
+ * current one was indistinguishable from the rest. Arrow keys move between
+ * options, which is what a radio group's roving tabindex is for and what makes
+ * this operable with one hand on the keyboard.
+ */
 function Segmented<V extends string>({ value, options, onChange }: {
   value: V;
   options: Array<{ v: V; label: string }>;
   onChange: (v: V) => void;
 }) {
+  const named = useContext(RowLabel);
+  const move = (i: number, delta: number) => {
+    const next = options[(i + delta + options.length) % options.length];
+    onChange(next.v);
+  };
   return (
-    <div className="segmented">
-      {options.map((o) => (
-        <button key={o.v} className={value === o.v ? 'on' : ''} onClick={() => onChange(o.v)}>{o.label}</button>
+    <div className="segmented" role="radiogroup" aria-labelledby={named?.labelId} aria-describedby={named?.subId}>
+      {options.map((o, i) => (
+        <button
+          key={o.v}
+          role="radio"
+          aria-checked={value === o.v}
+          tabIndex={value === o.v ? 0 : -1}
+          className={value === o.v ? 'on' : ''}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(i, 1); }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); move(i, -1); }
+          }}
+          onClick={() => onChange(o.v)}
+        >{o.label}</button>
       ))}
     </div>
   );
@@ -129,9 +207,9 @@ function AccountTab({ onDeleted }: { onDeleted: () => void }) {
     try {
       const { url } = await uploadFile(file);
       setUser(await api.updateMe({ avatarUrl: url }));
-      toast.success('Photo updated');
+      toast.success(t('toast.photoSaved'));
     } catch {
-      toast.error('Photo upload failed');
+      toast.error(t('toast.photoFailed'));
     } finally {
       setBusy(false);
     }
@@ -169,7 +247,9 @@ function AccountTab({ onDeleted }: { onDeleted: () => void }) {
     try {
       await api.deleteAccount();
       onDeleted();
-      logout();
+      // Awaited: the person has just asked for everything to be destroyed, and
+      // the local mirror is the most accessible copy of all of it.
+      await logout();
     } catch (err: any) {
       toast.error(err?.message || 'Account deletion failed');
       setBusy(false);
@@ -191,7 +271,7 @@ function AccountTab({ onDeleted }: { onDeleted: () => void }) {
           {user.avatarUrl && (
             <button className="sr-action danger" disabled={busy}
               onClick={() => void api.updateMe({ avatarUrl: '-' }).then(setUser)}>
-              Remove
+              {t('share.remove')}
             </button>
           )}
           <input ref={avatarInput} type="file" accept="image/*" hidden onChange={(e) => void uploadAvatar(e.target.files?.[0])} />
@@ -305,6 +385,13 @@ function NotificationsTab() {
 
 const ACCENTS = ['#5e5ce6', '#1c7ed6', '#0ca678', '#2eb85c', '#f2a20d', '#e8590c', '#e64980', '#845ef7', '#212529'];
 
+/** The nine swatches, said aloud. */
+const ACCENT_NAMES: Record<string, TKey> = {
+  '#5e5ce6': 'accent.indigo', '#1c7ed6': 'accent.blue', '#0ca678': 'accent.teal',
+  '#2eb85c': 'accent.green', '#f2a20d': 'accent.amber', '#e8590c': 'accent.orange',
+  '#e64980': 'accent.pink', '#845ef7': 'accent.violet', '#212529': 'accent.graphite',
+};
+
 function AppearanceTab() {
   const { settings, update } = useSettings();
   const a = settings.appearance;
@@ -324,14 +411,19 @@ function AppearanceTab() {
         />
       </Row>
       <Row label={t('appearance.accent')}>
-        <div className="accent-swatches">
+        {/* Named by colour, not by hex. "#845ef7" is not a colour to anybody
+            who cannot see it, and it was the swatch's only accessible name. */}
+        <div className="accent-swatches" role="radiogroup" aria-label={t('appearance.accent')}>
           {ACCENTS.map((hex) => (
             <button
               key={hex}
+              role="radio"
+              aria-checked={a.accentColor === hex}
+              aria-label={t(ACCENT_NAMES[hex])}
               className={`accent-swatch${a.accentColor === hex ? ' on' : ''}`}
               style={{ background: hex }}
               onClick={() => set({ accentColor: hex })}
-              title={hex}
+              title={t(ACCENT_NAMES[hex])}
             />
           ))}
         </div>
@@ -352,6 +444,109 @@ function AppearanceTab() {
           onChange={(v) => set({ uiDensity: v })}
         />
       </Row>
+    </>
+  );
+}
+
+// ---- Accessibility ----
+
+/**
+ * AX30. Settings had five root-attribute channels — theme, density, dot grid,
+ * card shadows, accent — and zero accessibility options. The product would let
+ * a person turn off card shadows and could not let them turn off a
+ * full-viewport camera tween the agent fires on every plan arrival.
+ *
+ * The plumbing was never the obstacle; `applySideEffects` already stamps five
+ * attributes on the root and already subscribes to one OS media query. What was
+ * missing was anybody deciding these were settings. Stating it as one product
+ * surface with one owner is what turns a scattered list of CSS fixes into a
+ * place a person can go — and, for `announceVerbosity`, into the only place a
+ * question with no correct default can be answered by the person it is about.
+ */
+function AccessibilityTab() {
+  const { settings, update } = useSettings();
+  const a = settings.accessibility;
+  const set = (patch: Partial<UserSettings['accessibility']>) => update({ accessibility: patch });
+
+  return (
+    <>
+      <Row label={t('a11y.motion')} sub={t('a11y.motionSub')}>
+        <Segmented
+          value={a.motion}
+          options={[
+            { v: 'system', label: t('a11y.system') },
+            { v: 'full', label: t('a11y.motionFull') },
+            { v: 'reduced', label: t('a11y.motionReduced') },
+          ]}
+          onChange={(v) => set({ motion: v })}
+        />
+      </Row>
+      <Row label={t('a11y.contrast')} sub={t('a11y.contrastSub')}>
+        <Segmented
+          value={a.contrast}
+          options={[
+            { v: 'system', label: t('a11y.system') },
+            { v: 'normal', label: t('a11y.contrastNormal') },
+            { v: 'more', label: t('a11y.contrastMore') },
+          ]}
+          onChange={(v) => set({ contrast: v })}
+        />
+      </Row>
+      <Row label={t('a11y.textScale')} sub={t('a11y.textScaleSub')}>
+        <Segmented
+          value={String(a.textScale) as '100' | '115' | '130' | '150'}
+          options={[
+            { v: '100', label: t('a11y.scale100') },
+            { v: '115', label: t('a11y.scale115') },
+            { v: '130', label: t('a11y.scale130') },
+            { v: '150', label: t('a11y.scale150') },
+          ]}
+          onChange={(v) => set({ textScale: Number(v) as UserSettings['accessibility']['textScale'] })}
+        />
+      </Row>
+      <Row label={t('a11y.transparency')} sub={t('a11y.transparencySub')}>
+        <Segmented
+          value={a.transparency}
+          options={[
+            { v: 'system', label: t('a11y.system') },
+            { v: 'full', label: t('a11y.transparencyFull') },
+            { v: 'reduced', label: t('a11y.transparencyReduced') },
+          ]}
+          onChange={(v) => set({ transparency: v })}
+        />
+      </Row>
+      {/* No default can guess this one. For one person forty staged actions
+          ARE the review; for another they are forty interruptions. */}
+      <Row label={t('a11y.verbosity')} sub={t('a11y.verbositySub')}>
+        <Segmented
+          value={a.announceVerbosity}
+          options={[
+            { v: 'outcome', label: t('a11y.verbosityOutcome') },
+            { v: 'normal', label: t('a11y.verbosityNormal') },
+            { v: 'verbose', label: t('a11y.verbosityVerbose') },
+          ]}
+          onChange={(v) => set({ announceVerbosity: v })}
+        />
+      </Row>
+      <Row label={t('a11y.singleKey')} sub={t('a11y.singleKeySub')}>
+        <Switch on={a.singleKeyShortcuts} onChange={(v) => set({ singleKeyShortcuts: v })} />
+      </Row>
+
+      {/* AX20's other half. A shortcut a person cannot enumerate is a shortcut
+          they cannot avoid, and this keymap lived in three files with no shared
+          vocabulary — which is exactly why `z` went unnoticed for so long. */}
+      <div className="settings-section-head">{t('a11y.shortcuts')}</div>
+      <table className="shortcut-table">
+        <tbody>
+          {SHORTCUTS.map((sc) => (
+            <tr key={`${sc.id}-${sc.combo}`}>
+              <th scope="row">{t(`shortcut.${sc.id}` as TKey)}</th>
+              <td><kbd>{sc.combo}</kbd></td>
+              <td className="sc-scope">{sc.scope === 'canvas' ? t('a11y.scopeCanvas') : t('a11y.scopeGlobal')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }
@@ -503,6 +698,38 @@ function ToolbarTab() {
   );
 }
 
+// ---- AI agent ----
+
+/**
+ * Standing notes that apply to every board this person owns.
+ *
+ * Board rules already existed and remain the right default — most conventions
+ * belong to a board, not a person. But a rule that is true everywhere had to be
+ * retyped on every board, so in practice it was written nowhere.
+ */
+function AgentTab() {
+  const { settings, update } = useSettings();
+  const [draft, setDraft] = useState(settings.agent.instructions);
+
+  return (
+    <Row label={t('agentprefs.instructions')} sub={t('agentprefs.instructionsSub')}>
+      <textarea
+        className="sr-textarea"
+        dir="auto"
+        rows={5}
+        value={draft}
+        placeholder={t('agentprefs.placeholder')}
+        onChange={(e) => setDraft(e.target.value)}
+        // Committed on blur rather than per keystroke: this is prose, and the
+        // debounced PATCH would otherwise write a dozen half-sentences.
+        onBlur={() => {
+          if (draft !== settings.agent.instructions) update({ agent: { instructions: draft } });
+        }}
+      />
+    </Row>
+  );
+}
+
 // ---- Privacy ----
 
 function PrivacyTab() {
@@ -521,7 +748,7 @@ function PrivacyTab() {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch {
-      toast.error('Export failed');
+      toast.error(t('toast.exportFailed'));
     } finally {
       setExporting(false);
     }

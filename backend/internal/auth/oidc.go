@@ -50,6 +50,12 @@ type tokenClaims struct {
 	Name              string `json:"name"`
 	PreferredUsername string `json:"preferred_username"`
 	Azp               string `json:"azp"`
+	// RealmAccess holds the realm roles Keycloak puts in every access token
+	// without a mapper. Absent for callers who have none, which is everyone
+	// but platform staff.
+	RealmAccess struct {
+		Roles []string `json:"roles"`
+	} `json:"realm_access"`
 }
 
 // VerifyToken checks signature, issuer, expiry, and the authorized party,
@@ -77,5 +83,10 @@ func (v *Verifier) VerifyToken(ctx context.Context, raw string) (*domain.Princip
 	return &domain.Principal{
 		Sub: idToken.Subject, Email: claims.Email, Name: name,
 		ExpiresAt: idToken.Expiry,
+		// Copied, not aliased: the principal is snapshotted downstream (the WS
+		// ticket) and no two copies may share a backing array. A token without
+		// realm roles still yields nil here, so nothing allocates for the
+		// callers who are not staff.
+		PlatformRoles: append([]string(nil), claims.RealmAccess.Roles...),
 	}, nil
 }

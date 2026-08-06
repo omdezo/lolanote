@@ -2,6 +2,7 @@
 // Unrecognized types render a graceful UNKNOWN fallback — the same
 // forward-compatibility mechanism Milanote ships (§9.4).
 import type { QElement } from '../../api/types';
+import { t } from '../../i18n';
 import { useBoard } from '../../store/boardStore';
 import { NoteCard } from './NoteCard';
 import { ColumnView } from './ColumnView';
@@ -34,7 +35,7 @@ export function ElementView(props: ElementViewProps) {
       const source = elements[element.content?.cloneSourceId];
       return source
         ? <NoteCard element={source} cloneShellId={element.id} />
-        : <div className="note-card" style={{ color: '#9a97a5', fontSize: 12 }}>Synced note unavailable</div>;
+        : <div className="note-card" style={{ color: '#9a97a5', fontSize: '0.75rem' }}>{t('canvas.syncUnavailable')}</div>;
     }
     case 'BOARD':
     case 'ALIAS':
@@ -56,11 +57,11 @@ export function ElementView(props: ElementViewProps) {
     case 'COMMENT_THREAD':
       return <CommentCard element={element} />;
     case 'SKELETON':
-      return <div className="note-card" style={{ opacity: 0.4 }}>Loading…</div>;
+      return <div className="note-card" style={{ opacity: 0.4 }}>{t('canvas.loading')}</div>;
     default:
       return (
-        <div className="note-card" style={{ color: '#9a97a5', fontSize: 12 }}>
-          Unsupported element ({element.type}) — kept safe for newer clients.
+        <div className="note-card" style={{ color: '#9a97a5', fontSize: '0.75rem' }}>
+          {t('canvas.unsupported')} ({element.type})
         </div>
       );
   }

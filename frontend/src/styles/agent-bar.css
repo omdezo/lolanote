@@ -14,7 +14,14 @@
   /* Centred on the CANVAS, not the window, so the tool rail does not push it
      visually off-centre. Logical properties keep it correct in RTL. */
   inset-inline: var(--rail-w) 0;
-  bottom: 22px;
+  /* MO6. `position: fixed` measures against the LAYOUT viewport, which iOS
+     does not shrink for the keyboard — so the composer was drawn underneath
+     the keyboard the instant it auto-focused itself. `--kb-inset` is published
+     by lib/keyboardInset.ts from `window.visualViewport`; `env()` needs the
+     `viewport-fit=cover` added to index.html, without which a notched iPhone
+     drew the pill under the home indicator. Both default to zero, so nothing
+     on a desktop moves. */
+  bottom: calc(22px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex;
   justify-content: center;
   align-items: flex-end;
@@ -45,7 +52,7 @@
   padding: 12px 14px;
   border-radius: var(--r-pill);
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-align: start;
   transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease), color 0.2s var(--ease);
 }
@@ -57,7 +64,7 @@
   box-shadow: 0 0 0 1px var(--hairline), var(--shadow-pop);
 }
 .agent-pill kbd {
-  font: inherit; font-size: 10.5px;
+  font: inherit; font-size: 0.65625rem;
   color: var(--ink-3);
   background: var(--hover-strong);
   border-radius: 6px; padding: 2px 6px;
@@ -73,6 +80,16 @@
   display: flex;
   flex-direction: column;
   transition: box-shadow 0.2s var(--ease);
+  /* MO7. The Decide card stacks a summary, PlanNotes, a quarantine warning, a
+     destructive warning, an optional revise row and a seven-control decision
+     row above the plan list, anchored at the bottom and growing UPWARD — with
+     no cap of any kind. On a 667px phone with the keyboard open it overflowed
+     past the top of the screen where nothing clips it and nothing scrolls it,
+     and what went first was the summary and the destructive-changes warning:
+     the wrong end to lose. `dvh` because the URL bar moves; `--kb-inset`
+     because the layout viewport does not shrink on iOS. */
+  max-height: calc(100dvh - var(--topbar-h) - var(--kb-inset, 0px) - 24px);
+  min-height: 0;
 }
 /* The field has no border of its own, so focus is expressed by the whole
    card — one object lighting up rather than a ring inside a ring. */
@@ -92,7 +109,7 @@
 .ac-preset {
   flex: 0 1 auto;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   color: var(--ink-3);
   background: var(--hover);
   border-radius: var(--r-pill);
@@ -104,10 +121,22 @@
 }
 .ac-preset:hover { background: var(--hover-strong); color: var(--ink); }
 
+/* The provider is configured but not answering. Stated at the top of the card
+   rather than discovered by pressing send and watching a run fail. */
+.ac-offline {
+  margin: 0 8px 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 0.71875rem;
+  line-height: 1.35;
+  color: var(--danger-text, #b4232a);
+  background: var(--danger-tint, rgba(180, 35, 42, 0.09));
+}
+
 .ac-recent { display: flex; flex-direction: column; gap: 1px; padding: 0 8px 6px; }
 .ac-recent-row {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11.5px; color: var(--ink-3);
+  font-size: 0.71875rem; color: var(--ink-3);
   padding: 3px 0;
 }
 .ac-recent-row span {
@@ -116,6 +145,22 @@
 }
 .ac-recent-row button { color: var(--accent); padding: 2px 7px; border-radius: 6px; }
 .ac-recent-row button:hover { background: var(--accent-tint); }
+
+/* JN8's run ledger. Scrolls rather than truncating, because the whole point is
+   that the list no longer ends at six — a scrollbar is an honest edge and a
+   silently shortened list is not. */
+.ac-ledger { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+.ac-ledger-head { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; padding: 4px 0; }
+.ac-ledger-head strong { flex: 1; min-width: 0; }
+.ac-ledger-list { max-height: 240px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.ac-ledger-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: 0.71875rem; color: var(--ink-3); padding: 5px 0;
+  border-top: 1px solid var(--hairline);
+}
+.ac-ledger-intent { flex: 1 1 140px; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-ledger-meta { flex: 0 0 auto; }
+.ac-ledger-open { margin: 0 8px 8px; }
 
 /* ---- the field ------------------------------------------------------- */
 
@@ -131,11 +176,10 @@
   flex: 1;
   min-width: 0;
   border: none;
-  outline: none;
   resize: none;
   background: transparent;
   font: inherit;
-  font-size: 14.5px;
+  font-size: 0.90625rem;
   line-height: 1.5;
   color: var(--ink);
   max-height: 140px;
@@ -149,7 +193,7 @@
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  font-size: 15px;
+  font-size: 0.9375rem;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.16s var(--ease), transform 0.16s var(--ease), opacity 0.16s var(--ease);
 }
@@ -171,7 +215,7 @@
    what will happen instead of offering a menu of what could. */
 .ac-chip {
   display: flex; align-items: center; gap: 6px;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   color: var(--ink-3);
   background: transparent;
   border-radius: var(--r-pill);
@@ -188,8 +232,8 @@
 .ac-chip.mode.auto:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
 .ac-spacer { flex: 1; }
-.ac-hint { font-size: 11px; color: var(--ink-3); opacity: 0.75; padding-inline-end: 4px; }
-.ac-hint kbd { font: inherit; font-size: 10px; opacity: 0.9; }
+.ac-hint { font-size: 0.6875rem; color: var(--ink-3); opacity: 0.75; padding-inline-end: 4px; }
+.ac-hint kbd { font: inherit; font-size: 0.625rem; opacity: 0.9; }
 
 /* ---- working --------------------------------------------------------- */
 
@@ -202,18 +246,18 @@
 }
 .ac-ticker li {
   display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--ink-3);
+  font-size: 0.75rem; color: var(--ink-3);
   animation: tick-in 0.24s var(--ease) both;
 }
 .ac-ticker li span:last-child {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ac-ticker li.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+.ac-ticker li.danger .ap-kind { background: var(--danger-tint); color: var(--danger-text); }
 @keyframes tick-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 .ac-statusrow { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; }
-.ac-status { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-status { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-pulse {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent); flex: none;
@@ -225,25 +269,39 @@
 }
 .ac-badge {
   flex: none;
-  font-size: 11px; color: var(--ink-3);
+  font-size: 0.6875rem; color: var(--ink-3);
   padding: 2px 2px;
   font-variant-numeric: tabular-nums;
 }
 
 /* ---- decide ---------------------------------------------------------- */
 
-.ac-summary { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; padding: 10px 12px 4px; }
+.ac-summary { font-size: 0.78125rem; color: var(--ink-2); line-height: 1.55; padding: 10px 12px 4px; }
 
 .ac-warn {
-  font-size: 11.5px; line-height: 1.5;
-  color: var(--danger); background: var(--danger-tint);
+  font-size: 0.71875rem; line-height: 1.5;
+  color: var(--danger-text); background: var(--danger-tint);
   border-radius: 10px; padding: 8px 11px;
   margin: 4px 6px;
 }
 
-.ac-decide { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; }
+/* JN21's proposal clock. Amber while there is still room to act, red inside
+   the last minutes — but the words carry the whole message either way, because
+   a person who cannot distinguish the two hues must still learn the same fact. */
+.ac-deadline { color: var(--warn-text); background: rgba(242, 162, 13, 0.12); }
+.ac-deadline.d-critical { color: var(--danger-text); background: var(--danger-tint); }
+
+/* Wraps, because this row carries a sentence, a cost, and four buttons — and
+   on a 360px screen it used to crush them into each other. The text keeps the
+   whole first line; the controls fall to a second row together. */
+.ac-decide {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px; padding: 6px 6px 6px 14px;
+}
+.ac-decide-text { flex: 1 1 100%; }
+@media (min-width: 560px) { .ac-decide-text { flex: 1 1 auto; } }
 .ac-decide > svg { color: var(--accent); flex: none; }
-.ac-decide-text { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-3); }
+.ac-decide-text { min-width: 0; font-size: 0.8125rem; color: var(--ink-3); }
 .ac-decide-text strong { color: var(--ink); font-weight: 600; }
 .ac-decide-text em { font-style: normal; color: var(--accent); }
 
@@ -259,7 +317,7 @@
   display: flex; align-items: center; gap: 5px;
   padding: 7px 11px;
   border-radius: 9px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   color: var(--ink-3); background: transparent;
   transition: background 0.14s var(--ease), color 0.14s var(--ease);
 }
@@ -271,7 +329,7 @@
   display: flex; align-items: center; gap: 7px;
   padding: 7px 15px;
   border-radius: 9px;
-  font-size: 12.5px; font-weight: 600;
+  font-size: 0.78125rem; font-weight: 600;
   background: var(--accent); color: #fff;
   transition: background 0.16s var(--ease), transform 0.16s var(--ease);
 }
@@ -279,21 +337,74 @@
 .ac-apply:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 .ac-apply kbd {
-  font: inherit; font-size: 10px; opacity: 0.65;
+  font: inherit; font-size: 0.625rem; opacity: 0.65;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px; padding: 1px 4px;
 }
 
-.ac-checks { margin: 0; padding: 8px 12px 0 30px; font-size: 11.5px; color: var(--ink-3); line-height: 1.6; }
+/* A real <ul> of the checks that failed. It carried padding and no
+   list-style, so every failed check drew a bullet the rest of this panel
+   has nowhere else — found by the list guard below, not by a screenshot,
+   which is the point of the guard. */
+.ac-checks { margin: 0; padding: 8px 12px 0 30px; font-size: 0.71875rem; color: var(--ink-3); line-height: 1.6; list-style: none; }
 
 /* ---- plan list (on demand) ------------------------------------------- */
+
+/* The list is narrowed to one nested board; this says which, and gets out. */
+.ac-plan-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 0.71875rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ac-plan-filter > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- CV15 / LP3: narrowing, and the collapsed remainder ---------------
+   The counts were already computed; the list was the only one in the app with
+   no way to ask the question a reviewer always has — what does this delete, and
+   what does it move that I already placed. */
+.ac-plan-chips {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 2px 4px 6px;
+  position: sticky; top: 0; z-index: 2;
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(18px);
+}
+.ac-plan-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  font-size: 0.6875rem; font-weight: 600; color: var(--ink-2);
+  background: var(--surface-2); box-shadow: 0 0 0 1px var(--hairline);
+}
+.ac-plan-chip b { font-weight: 700; color: var(--ink-3); }
+.ac-plan-chip.on { color: #fff; background: var(--accent); box-shadow: none; }
+.ac-plan-chip.on b { color: rgba(255,255,255,0.82); }
+.ac-plan-chip.danger:not(.on) { color: var(--danger-text, #d63031); }
+
+.ac-plan-more {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 6px 2px;
+}
 
 .ac-plan {
   list-style: none;
   margin: 4px 4px 0;
   padding: 0 0 8px;
-  max-height: 42vh;
+  /* MO7. `42vh` is a LAYOUT-viewport unit, so with the keyboard open on a 667px
+     phone the list still claimed 280px inside a ~330px visible strip and the
+     card overflowed the top of the screen. The list now flexes inside the
+     card's own cap instead of carrying a viewport measure of its own — the cap
+     belongs to the container, which is the thing that has to fit. The
+     max-height stays as an upper bound on desktop, where the card is nowhere
+     near the screen height and an unbounded list would be a wall of rows. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 42dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 1px;
   border-bottom: 1px solid var(--hairline);
 }
@@ -302,7 +413,7 @@
   display: flex; align-items: center; gap: 8px;
   padding: 6px 6px 6px 8px;
   border-radius: 8px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   transition: background 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 .ap-row:hover { background: var(--hover); }
@@ -310,11 +421,11 @@
 .ap-row.hot { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
 .ap-row.dropped { opacity: 0.42; }
 .ap-row.dropped .ap-row-text { text-decoration: line-through; }
-.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger); }
+.ap-row.danger .ap-kind { background: var(--danger-tint); color: var(--danger-text); }
 
 .ap-kind {
   flex: none;
-  font-size: 10px; font-weight: 650; letter-spacing: 0.02em;
+  font-size: 0.625rem; font-weight: 650; letter-spacing: 0.02em;
   color: var(--accent); background: var(--accent-tint);
   border-radius: 5px; padding: 2px 6px;
 }
@@ -334,11 +445,38 @@
 
 .ap-row-input {
   flex: 1; min-width: 0;
-  border: none; outline: none;
+  border: none;
   background: var(--surface);
   box-shadow: 0 0 0 2px var(--accent);
   border-radius: 6px; padding: 3px 6px;
-  font: inherit; font-size: 12.5px; color: var(--ink);
+  font: inherit; font-size: 0.78125rem; color: var(--ink);
+}
+
+/* The drop-this-action / put-this-back control.
+ *
+ * It was `opacity: 0` until the row was hovered, with no :focus-within and no
+ * coarse-pointer branch — which made per-action review, the whole point of the
+ * trust wave, a mouse-only feature. On a phone (which is what display:standalone
+ * ships) hover never fires, so a mobile reviewer's options collapsed to
+ * Apply-all or Discard-all: exactly the coarse bargain per-action revert exists
+ * to remove. For keyboard users the button was focusable AND drawn at opacity
+ * zero — 2.4.11 and 2.4.7 failing together. And the asymmetry was perfect:
+ * `.ap-row.dropped .ap-row-x { opacity: 1 }` meant PUT BACK was visible while
+ * LEAVE OUT was not, so the control appeared only after you had used the
+ * control you could not see.
+ *
+ * Reduced contrast, not zero opacity: a destructive-adjacent control should be
+ * quiet, never absent. */
+/* The count of what a drop takes with it, on the row that caused it.
+ *
+ * Always visible, never hover-revealed: it is a statement about the size of an
+ * act, and a disclosure you have to hover to read is one nobody reads. Sized in
+ * rem so it grows with the browser's text setting like every other label. */
+.ap-row-cascade {
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .ap-row-x {
@@ -346,10 +484,14 @@
   width: 18px; height: 18px;
   border-radius: 5px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--ink-3); font-size: 11px;
-  opacity: 0;
+  color: var(--ink-3); font-size: 0.6875rem;
+  opacity: 0.45;
+  position: relative;
 }
-.ap-row:hover .ap-row-x, .ap-row.dropped .ap-row-x { opacity: 1; }
+.ap-row:hover .ap-row-x,
+.ap-row:focus-within .ap-row-x,
+.ap-row-x:focus-visible,
+.ap-row.dropped .ap-row-x { opacity: 1; }
 .ap-row-x:hover { background: var(--hover-strong); color: var(--ink); }
 
 /* A hovered ghost lifts to match its row. */
@@ -364,9 +506,17 @@
 .hint-pill { bottom: 78px; }
 
 @media (max-width: 720px) {
-  .agent-bar { inset-inline: 8px; bottom: 12px; }
+  .agent-bar { inset-inline: 8px; bottom: calc(12px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0px)); }
   .agent-shell { width: 100%; }
   .ac-hint { display: none; }
+  /* Everything else sharing the bottom edge is lifted by ONE token rather than
+     by a hand-tuned number per consumer. The full-width shell spans from 12px
+     to ~55px above the bottom edge, which completely encloses the zoom
+     cluster's 16–50px band at z-index 58 against 30 — and the zoom cluster and
+     its Fit button are the entire remaining navigation surface on a phone. The
+     hint pill was lifted clear of exactly this collision and the zoom cluster
+     was not: solved once, missed once. */
+  :root { --agent-bar-reserve: 66px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -390,10 +540,9 @@
   flex: 1;
   min-width: 0;
   border: none;
-  outline: none;
   background: transparent;
   font: inherit;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   color: var(--ink);
 }
 .ac-revise-input::placeholder { color: var(--ink-3); }
@@ -403,7 +552,7 @@
 .ac-question {
   display: flex; align-items: flex-start; gap: 10px;
   padding: 12px 12px 6px 14px;
-  font-size: 14px; line-height: 1.5; color: var(--ink);
+  font-size: 0.875rem; line-height: 1.5; color: var(--ink);
 }
 .ac-question svg { color: var(--accent); flex: none; margin-top: 3px; }
 .ac-answers {
@@ -411,7 +560,7 @@
   padding: 4px 6px 6px 14px;
 }
 .ac-answer {
-  font-size: 12.5px; font-weight: 550;
+  font-size: 0.78125rem; font-weight: 550;
   color: var(--accent); background: var(--accent-tint);
   border-radius: 9px; padding: 7px 13px;
   transition: background 0.14s var(--ease);
@@ -422,7 +571,7 @@
 /* An audit line: what the agent already did here, stated quietly. */
 .ac-audit-note {
   font-style: normal;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--ink-3);
   flex: none;
   font-variant-numeric: tabular-nums;
@@ -435,7 +584,7 @@
 .agent-pill.drift { cursor: default; gap: 8px; }
 .drift-take {
   flex: 1; min-width: 0;
-  text-align: start; font: inherit; font-size: 13px;
+  text-align: start; font: inherit; font-size: 0.8125rem;
   color: var(--ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -455,7 +604,7 @@
 .ac-file {
   display: flex; align-items: center; gap: 6px;
   max-width: 15rem;
-  font-size: 11.5px; color: var(--ink-2);
+  font-size: 0.71875rem; color: var(--ink-2);
   background: var(--hover); border-radius: var(--r-pill);
   padding: 4px 6px 4px 10px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -468,8 +617,249 @@
 .ac-clip {
   flex: none; width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 17px; color: var(--ink-3); background: var(--hover);
+  font-size: 1.0625rem; color: var(--ink-3); background: var(--hover);
   transition: background 0.16s var(--ease), color 0.16s var(--ease);
 }
 .ac-clip:hover:not(:disabled) { background: var(--hover-strong); color: var(--ink); }
 .ac-clip:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- what a plan does not do ----------------------------------------- */
+/* Deliberately not styled as an error. An unmet request is information the
+   user needs in order to decide, not a fault — dressing it in red would make
+   every constrained-but-correct run look like a failure. */
+.ac-unmet {
+  margin: 4px 6px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+}
+.ac-unmet-head {
+  font-size: 0.65625rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+  margin-bottom: 5px;
+}
+.ac-unmet ul { display: flex; flex-direction: column; gap: 4px; }
+.ac-unmet li {
+  font-size: 0.71875rem; line-height: 1.5; color: var(--ink-2);
+  padding-inline-start: 11px; position: relative;
+}
+.ac-unmet li::before {
+  content: '—';
+  position: absolute; inset-inline-start: 0; color: var(--ink-3);
+}
+.ac-unmet li em { font-style: normal; color: var(--ink-3); }
+/* Harness notes are about the run rather than the request, so they sit a shade
+   back from what the agent itself decided. */
+.ac-unmet li.ac-unmet-sys { color: var(--ink-3); }
+
+/* The worst case a run can spend. Sits with the chips, reads as a fact. */
+.ac-ceiling {
+  flex: none;
+  font-size: 0.6875rem; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+  align-self: center;
+}
+
+/* A scope the agent can only read in part. Not an error — a large board is a
+   good problem — so it is stated, not alarmed. */
+.ac-chip.partial i {
+  font-style: normal;
+  color: var(--ink-3);
+  font-size: 0.6875rem;
+  margin-inline-start: 3px;
+}
+.ac-chip.partial { box-shadow: inset 0 0 0 1px var(--hairline); }
+
+/* A colleague's run. Reads as information, not as your own control — no hover
+   lift, no pointer, because there is nothing here to press. */
+.agent-pill.observing {
+  cursor: default;
+  gap: 9px;
+  color: var(--ink-2);
+}
+.agent-pill.observing:hover { transform: none; }
+.agent-pill.observing b { color: var(--ink); font-weight: 600; }
+
+/* The allowance turning red is the only moment cost should raise its voice. */
+.ac-ceiling.low { color: var(--danger-text); font-weight: 600; }
+
+/* Where a change lands. Quieter than the thing being moved — the card's own
+   words stay the subject of the row — but always present, because a plan whose
+   rows do not say where are rows nobody can approve. */
+.ap-row-dest {
+  font-style: normal;
+  color: var(--accent);
+  margin-inline-start: 6px;
+  font-size: 0.71875rem;
+  white-space: nowrap;
+}
+.ap-row.dropped .ap-row-dest { color: var(--ink-3); }
+
+/* Redirect a change without deleting it. Sized to sit inside a plan row
+   without becoming the loudest thing on it. */
+.ap-row-dest-pick {
+  flex: none;
+  max-width: 130px;
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.ap-row-dest-pick:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* Steer mid-run. Sits under the status so the ticker stays the subject. */
+/* ---- LP7: what you have already said to this run ----------------------
+   Fire-and-forget steering meant a person typed a correction, watched the same
+   spinner, typed it again, and had the third one refused by a cap they had
+   never been shown. */
+.ac-steers {
+  list-style: none; margin: 0 0 6px; padding: 0 10px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ac-steer-chip {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 0.71875rem; color: var(--ink-2);
+  padding: 4px 9px; border-radius: 9px; background: var(--surface-2);
+}
+.ac-steer-state {
+  flex: none;
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.ac-steer-chip.delivered { color: var(--ink); }
+.ac-steer-chip.delivered .ac-steer-state { color: var(--accent); }
+
+.ac-steer { padding: 0 10px 9px; }
+.ac-steer-input {
+  width: 100%;
+  font-size: 0.75rem;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 7px 10px;
+}
+.ac-steer-input::placeholder { color: var(--ink-3); }
+.ac-steer-input:focus { border-color: var(--accent); }
+
+/* A rule the agent proposes after being corrected. Offered, never applied. */
+.ac-rule {
+  margin: 4px 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-tint);
+  border: 1px solid var(--hairline);
+}
+.ac-rule-head {
+  font-size: 0.65625rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px;
+}
+.ac-rule p { font-size: 0.78125rem; color: var(--ink); line-height: 1.5; }
+.ac-rule-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+
+/* ---- a plan that cannot be applied ------------------------------------
+   Staleness used to be a toast naming no element, no colleague and no next
+   step, over an Apply button that stayed enabled and failed every time. */
+.ac-stale {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 9px 12px; margin-bottom: 8px;
+  border-radius: 10px;
+  background: var(--danger-tint);
+  color: var(--ink);
+  font-size: 0.75rem; line-height: 1.45;
+}
+.ac-stale-text { flex: 1 1 200px; min-width: 0; }
+.ac-stale-text em { color: var(--ink-2); font-style: normal; }
+.ac-stale-actions { display: flex; gap: 6px; margin-inline-start: auto; }
+.ap-row.stale .ap-row-text { text-decoration: line-through; opacity: 0.6; }
+
+/* How much prose an edit destroys. The preview says what will exist; this is
+   the only thing that says what will stop existing. */
+.ap-row-loss {
+  margin-inline-start: 7px;
+  font-style: normal;
+  color: var(--danger-text);
+  font-size: 0.65625rem;
+  white-space: nowrap;
+}
+
+/* Where the run is, how long it has been going. */
+.ac-meta {
+  font-size: 0.65625rem;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A run that has stopped emitting must not keep pulsing as though it were
+   thinking — that pulse was the only liveness signal there has ever been. */
+.dock-pulse.stalled { animation: none; opacity: 0.35; }
+
+/* ---- who processes this board ----------------------------------------
+   The product calls the model "Qomra", a name in the user's own language
+   presented as part of the app. It is a courier. */
+.ac-processing { margin-top: 7px; }
+.ac-processing-line {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.65625rem; color: var(--ink-2);
+  text-align: start; line-height: 1.4;
+}
+.ac-processing-line:hover { color: var(--ink); text-decoration: underline dotted; }
+.ac-processing-body {
+  margin-top: 6px; padding: 9px 11px;
+  border-radius: 9px; background: var(--surface-2);
+  font-size: 0.71875rem; line-height: 1.5; color: var(--ink-2);
+}
+.ac-processing-body strong { display: block; color: var(--ink); margin-bottom: 3px; }
+.ac-processing-body p { margin: 0 0 4px; }
+
+/* ---- the first-run question ------------------------------------------
+   Occupies the composer rather than sitting beside it: there is no field to
+   type into and no button to send with until it is answered, because a
+   disclosure you can send a request past without reading is not one. */
+.ac-consent { padding: 2px 0; }
+.ac-consent-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--ink); font-size: 0.8125rem; margin-bottom: 7px;
+}
+.ac-consent-body {
+  margin: 0 0 7px; font-size: 0.75rem; line-height: 1.55; color: var(--ink-2);
+}
+.ac-consent-body strong { color: var(--ink); font-weight: 600; }
+.ac-consent-body a { color: var(--accent); }
+.ac-consent-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+
+/* ---- CV16: where the run's work actually went -------------------------
+   The agent's centre of gravity moved into nested boards and both the review
+   and the outcome surfaces stayed on the root canvas, so verifying a run that
+   filled four sub-boards meant opening four boards from memory. */
+.ac-destinations { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 8px; }
+.ac-destination {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-pill);
+  font-size: 0.71875rem; color: var(--ink-2);
+  background: var(--surface-2); box-shadow: 0 0 0 1px var(--hairline);
+}
+.ac-destination:hover { color: var(--ink); background: var(--hover-strong); }
+.ac-destination strong { color: var(--accent); font-weight: 700; }
+
+/* What was read, as opposed to what was changed — different questions, and
+   only one of them had an answer. */
+.ac-reads { margin-bottom: 8px; }
+.ac-reads-head {
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.07em;
+  color: var(--ink-3); text-transform: uppercase; margin-bottom: 4px;
+}
+
+/* AX14 · the steer acknowledgement, out of the placeholder and into a region
+   that can say it without renaming the field. */
+.ac-steer-ack {
+  min-height: 1em;
+  padding: 3px 4px 0;
+  font-size: 0.71875rem;
+  color: var(--ink-3);
+}

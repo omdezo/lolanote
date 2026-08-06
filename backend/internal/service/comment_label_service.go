@@ -87,6 +87,60 @@ func (s *CommentService) Add(ctx context.Context, p *domain.Principal, threadID,
 	return c, nil
 }
 
+// AnnounceAgentComment gives an agent-written comment everything a human's
+// comment gets: the live push, the board owner's bell, and any @mentions.
+//
+// The agent's comment used to be a bare repository Insert. So the REPORTING
+// register's entire output surface produced a message that never pushed
+// comment.new — nobody's open board showed it without a reload — never notified
+// the board owner though every human comment does, and could carry no mentions
+// at all. A run that answered "what is blocked?" on a shared board left an
+// answer nobody was told about.
+//
+// It is announce-only rather than a re-routed Add because the thread element
+// does not exist yet when the body is written: agent comments are pre-writes,
+// staged against an element the same transaction is about to create, so an
+// Add() that resolves the thread's ACL would fail on every new thread. The
+// authorization is not skipped, it has already happened — the ops that create
+// the thread go through the delegated write path, and this runs only after that
+// transaction has landed.
+func (s *CommentService) AnnounceAgentComment(ctx context.Context, p *domain.Principal, c *domain.Comment, mentions []string) {
+	if c == nil || p == nil {
+		return
+	}
+	_, board, err := s.access.Resolve(ctx, c.ThreadID, p)
+	if err != nil || board == nil {
+		return
+	}
+	if s.events != nil {
+		s.events.BroadcastEvent(board.ID, "comment.new", c)
+	}
+	// "X's assistant", never "X": the sentence is about who wrote the words,
+	// and the whole point of the item is that the human did not.
+	who := p.Name + "'s assistant"
+	notified := map[string]bool{}
+	for _, sub := range mentions {
+		if sub == "" || notified[sub] {
+			continue
+		}
+		notified[sub] = true
+		s.notifier.Notify(ctx, &domain.Notification{
+			ID: s.newID(), UserID: sub, Kind: domain.NotifyMention,
+			ActorID: p.Sub, BoardID: board.ID, ElementID: c.ThreadID,
+			Origin: domain.OriginAgent, AgentRunID: c.AgentRunID,
+			Message: who + " mentioned you on \"" + board.Title() + "\"",
+		})
+	}
+	if board.ACL != nil && !notified[board.ACL.OwnerID] && board.ACL.OwnerID != "" {
+		s.notifier.Notify(ctx, &domain.Notification{
+			ID: s.newID(), UserID: board.ACL.OwnerID, Kind: domain.NotifyComment,
+			ActorID: p.Sub, BoardID: board.ID, ElementID: c.ThreadID,
+			Origin: domain.OriginAgent, AgentRunID: c.AgentRunID,
+			Message: who + " commented on \"" + board.Title() + "\"",
+		})
+	}
+}
+
 // Edit updates a message body — authors only.
 func (s *CommentService) Edit(ctx context.Context, p *domain.Principal, commentID, body string) (*domain.Comment, error) {
 	c, err := s.comments.Get(ctx, commentID)
@@ -213,6 +267,14 @@ func (s *LabelService) Attach(ctx context.Context, p *domain.Principal, elementI
 	if _, err := s.access.RequireEdit(ctx, elementID, p); err != nil {
 		return err
 	}
+	// The label must be the caller's own. Labels are private to their owner, so
+	// stamping somebody else's id onto an element both leaks that a label exists
+	// and inflates their usage count from outside their account. The agent's
+	// path has always checked this; the path a person uses did not.
+	label, err := s.labels.Get(ctx, labelID)
+	if err != nil || label.OwnerID != p.Sub {
+		return domain.ErrForbidden
+	}
 	el, err := s.elements.Get(ctx, elementID)
 	if err != nil {
 		return err
@@ -229,6 +291,22 @@ func (s *LabelService) Attach(ctx context.Context, p *domain.Principal, elementI
 	return s.labels.IncrementUsage(ctx, labelID, 1)
 }
 
+// Detach deliberately does NOT repeat Attach's ownership check, and the
+// asymmetry is the rule rather than an oversight in it.
+//
+// The invariant the write path settled on (see authorizeLabelPatch in
+// transaction_service.go, which enforces the same thing on the transaction
+// route) is about ATTACHING: you may only put your own label on something. Once
+// a label is genuinely on an element, taking it off is ordinary editing, and
+// anyone who may edit the element may do it — a collaborator tidying a shared
+// card should not be blocked by a tag whose owner has since left the board.
+//
+// The usage count therefore moves even for somebody else's label, because it
+// really did come off; leaving it high would strand a phantom in that person's
+// filter list with no element behind it and no way to reach it.
+//
+// If this ever grows an OwnerID check to "match Attach", a shared board acquires
+// tags nobody present can remove.
 func (s *LabelService) Detach(ctx context.Context, p *domain.Principal, elementID, labelID string) error {
 	if _, err := s.access.RequireEdit(ctx, elementID, p); err != nil {
 		return err

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -27,14 +29,25 @@ var _ Provider = (*Anthropic)(nil)
 
 // NewAnthropic constructs the provider. An empty apiKey is a configuration
 // error rather than a lazy failure at first use.
-func NewAnthropic(apiKey, model string) (*Anthropic, error) {
+// callTimeout bounds one HTTP call; see cognition.Options.CallTimeout for why
+// the caller owns it rather than this constructor.
+func NewAnthropic(apiKey, model string, callTimeout time.Duration) (*Anthropic, error) {
 	if apiKey == "" {
 		return nil, ErrNotConfigured
 	}
 	if model == "" {
 		model = DefaultModel
 	}
-	return &Anthropic{client: anthropic.NewClient(option.WithAPIKey(apiKey)), model: model}, nil
+	if callTimeout <= 0 {
+		callTimeout = defaultCallTimeout
+	}
+	return &Anthropic{
+		client: anthropic.NewClient(
+			option.WithAPIKey(apiKey),
+			option.WithHTTPClient(&http.Client{Timeout: callTimeout}),
+		),
+		model: model,
+	}, nil
 }
 
 // Name implements Provider.
@@ -99,6 +112,16 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),
 		CachedTokens: int(resp.Usage.CacheReadInputTokens),
+		// SC2. `input_tokens` excludes BOTH cache reads and cache writes, and
+		// this field was never read — so the first turn of every run wrote the
+		// ~10.8k-token cacheable prefix set up thirty lines above and booked it
+		// at zero. The under-count landed on MaxCostUSD, on the daily cap and on
+		// the figure shown to the person, and it grew precisely when the cache
+		// was working hardest.
+		CacheWriteTokens: int(resp.Usage.CacheCreationInputTokens),
+		// The call is counted where the call is made. Usage.Add used to count
+		// itself instead, which is how a fourteen-turn run reported calls:1.
+		Calls: 1,
 	}
 	if cost, ok := CostUSD(a.model, usage); ok {
 		usage.CostUSD = cost
@@ -175,7 +198,10 @@ func anthropicMessages(msgs []Message) []anthropic.MessageParam {
 func classifyAnthropic(err error) error {
 	var apiErr *anthropic.Error
 	if !errors.As(err, &apiErr) {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		// %w on both halves: a non-API error here is a transport error, and
+		// flattening it with %v made errors.Is(err, context.DeadlineExceeded)
+		// false for a call that had plainly timed out.
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	switch apiErr.StatusCode {
 	case 429, 500, 502, 503, 504, 529:

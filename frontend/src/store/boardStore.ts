@@ -10,14 +10,81 @@ import type { BreadcrumbEntry, Op, PresenceUser, QElement, User } from '../api/t
 import { loadBoardSnapshot, saveBoardSnapshot, type BoardSnapshot } from '../lib/boardCache';
 import { newClientId, newObjectId } from '../lib/objectId';
 import { toast } from '../components/ui/Toaster';
+import { t } from '../i18n';
 
 export const clientId = newClientId();
 
-interface UndoEntry { ops: Op[] }
+interface UndoEntry {
+  ops: Op[];
+  /**
+   * Which board these ops were committed against.
+   *
+   * The stack now survives navigation inside one board tree, so by the time an
+   * entry is undone the open board may not be the board it belongs to. Posting
+   * the inverse against whatever happens to be open would aim a transaction at
+   * a board that does not contain the elements it names.
+   */
+  boardId: string;
+  /**
+   * The agent run that wrote these ops, when one did.
+   *
+   * The invariant this exists to hold: ONE OP HAS ONE UNDO OWNER. An agent
+   * transaction lands in this stack (correctly — it is your edit, made on your
+   * behalf), and it is also owned by the run, which tracks what it has written
+   * and what has since been undone. Undoing it as a raw inverse left the run
+   * still claiming the work was applied, and the outcome card's Undo a no-op;
+   * pressing Ctrl+Shift+Z afterwards put the work back on the board while the
+   * run recorded it as reverted, with no way left to remove it but by hand.
+   */
+  agentRunId?: string;
+  /** Undone through the run, so redo is not this stack's to give back. */
+  runReverted?: boolean;
+}
+
+/**
+ * Runs whose revert THIS client asked for, and how many are still in flight.
+ *
+ * The revert is itself an agent-origin transaction carrying the reverting
+ * user's id, so it comes back over the socket looking exactly like the run's
+ * own work and used to be adopted as a fresh undo entry — an entry whose undo
+ * would ask the server to revert a run it has already reverted, i.e. a Ctrl+Z
+ * that does nothing. Counted rather than a Set because a run reverted one
+ * element at a time produces one transaction per revert.
+ *
+ * Every expectation expires. If the socket is down when the revert lands, the
+ * message that would have consumed it never arrives, and an expectation with no
+ * end would silently swallow the next real agent transaction for that run —
+ * trading a Ctrl+Z that does nothing for a Ctrl+Z that is not there at all.
+ */
+const revertsInFlight = new Map<string, { count: number; until: number }>();
+const REVERT_ECHO_WINDOW_MS = 30_000;
+
+/** Called before asking the server to revert a run, from either surface. */
+export function expectRunRevert(runId: string): void {
+  const live = revertsInFlight.get(runId);
+  const count = live && live.until > Date.now() ? live.count + 1 : 1;
+  revertsInFlight.set(runId, { count, until: Date.now() + REVERT_ECHO_WINDOW_MS });
+}
+
+/** The revert never happened — drop the expectation rather than leaving it to
+ *  eat the next transaction this run produces. */
+export function forgetRunRevert(runId: string): void {
+  revertsInFlight.delete(runId);
+}
 
 interface BoardState {
   user: User | null;
   boardId: string;
+  /**
+   * The top of the tree the open board belongs to.
+   *
+   * Undo used to be cleared on every openBoard, which meant stepping into a
+   * column's sub-board and back — journey 4, the most ordinary navigation in
+   * the product — destroyed the history, including for an agent run applied
+   * ninety seconds earlier. Keyed on the root, the stack survives movement
+   * within one tree and resets when you genuinely go somewhere else.
+   */
+  rootBoardId: string;
   boardTitle: string;
   breadcrumb: BreadcrumbEntry[];
   role: string;
@@ -37,6 +104,8 @@ interface BoardState {
   upsertElements(els: QElement[]): void;
   applyOps(ops: Op[]): void;
   commitTransaction(ops: Op[]): Promise<void>;
+  /** Record already-applied remote ops as a local undo step (see below). */
+  adoptRemote(ops: Op[], agentRunId?: string): void;
   undo(): void;
   redo(): void;
   select(ids: string[], additive?: boolean): void;
@@ -82,6 +151,7 @@ export function snapshotForUndo(el: QElement | undefined, changes: Record<string
 export const useBoard = create<BoardState>((set, get) => ({
   user: null,
   boardId: '',
+  rootBoardId: '',
   boardTitle: '',
   breadcrumb: [],
   role: 'none',
@@ -98,7 +168,11 @@ export const useBoard = create<BoardState>((set, get) => ({
   setUser: (u) => set({ user: u }),
 
   async openBoard(boardId) {
-    set({ loading: true, boardId, elements: {}, selection: new Set(), undoStack: [], redoStack: [], presence: {}, remoteEditing: {} });
+    // The stacks are NOT cleared here. Which tree this board belongs to is not
+    // known until the breadcrumb arrives, and clearing first meant every
+    // navigation destroyed the history — including the one step in and back out
+    // that the product's own nesting encourages.
+    set({ loading: true, boardId, elements: {}, selection: new Set(), presence: {}, remoteEditing: {} });
 
     // Render-from-cache-first (§9.6): a cached snapshot paints instantly;
     // the network fetch below reconciles to server truth right after.
@@ -107,13 +181,28 @@ export const useBoard = create<BoardState>((set, get) => ({
       if (get().boardId !== boardId) return;
       const elements: Record<string, QElement> = { [snap.view.board.id]: snap.view.board };
       for (const el of [...snap.children, ...snap.unsorted]) elements[el.id] = el;
+      // Ancestors, root first — so the first crumb is the top of this tree, and
+      // a board with no crumbs IS the top of its own.
+      const rootBoardId = snap.view.breadcrumb?.[0]?.id ?? snap.view.board.id;
+      const leftTheTree = get().rootBoardId !== '' && get().rootBoardId !== rootBoardId;
+      const title = snap.view.board.content?.title ?? 'Untitled';
+      // AX18. A repo-wide grep for `document.title` returned zero while this
+      // store maintained `boardTitle` for the chrome. Board navigation in this
+      // product IS page navigation — `navigate()` swaps the entire store and
+      // the realtime room and replaces the whole canvas — and it produced no
+      // title change, no focus change and no announcement. The browser tab, the
+      // window switcher, the history entry and the bookmark all kept saying
+      // "QomraNote" no matter where you were.
+      if (typeof document !== 'undefined') document.title = `${title} — QomraNote`;
       set({
-        boardTitle: snap.view.board.content?.title ?? 'Untitled',
+        boardTitle: title,
         breadcrumb: snap.view.breadcrumb ?? [],
+        rootBoardId,
         role: snap.view.role,
         readOnly: snap.view.role !== 'owner' && snap.view.role !== 'edit',
         elements,
         loading,
+        ...(leftTheTree ? { undoStack: [], redoStack: [] } : {}),
       });
     };
 
@@ -229,7 +318,7 @@ export const useBoard = create<BoardState>((set, get) => ({
     // but blocking here keeps the optimistic UI honest.
     if (readOnly) return;
     applyOps(ops);
-    set((s) => ({ undoStack: [...s.undoStack.slice(-99), { ops }], redoStack: [] }));
+    set((s) => ({ undoStack: [...s.undoStack.slice(-99), { ops, boardId }], redoStack: [] }));
     try {
       await api.applyTransaction(boardId, clientId, ops);
     } catch (err: any) {
@@ -239,10 +328,56 @@ export const useBoard = create<BoardState>((set, get) => ({
     }
   },
 
+  /**
+   * Record ops that have ALREADY been applied as a local undo step.
+   *
+   * For writes that arrive over the socket but are the user's own doing — an
+   * agent run acting on their behalf. Without this the agent's transaction was
+   * applied and never recorded, so Ctrl+Z reached past it and undid whatever
+   * the person did before, silently, while the auto-apply tooltip promised
+   * "still one undo".
+   *
+   * Deliberately does not call applyOps: the caller has already reduced them,
+   * and applying twice would double every move.
+   */
+  adoptRemote(ops, agentRunId) {
+    if (!ops.length) return;
+    // A revert we asked for is not new work to remember: adopting it would put
+    // an entry on the stack whose undo asks the server to revert a run it has
+    // already reverted.
+    const expected = agentRunId ? revertsInFlight.get(agentRunId) : undefined;
+    if (expected && expected.until > Date.now()) {
+      if (expected.count > 1) revertsInFlight.set(agentRunId!, { ...expected, count: expected.count - 1 });
+      else revertsInFlight.delete(agentRunId!);
+      return;
+    }
+    set((s) => ({
+      undoStack: [...s.undoStack.slice(-99), { ops, boardId: s.boardId, agentRunId }],
+      redoStack: [],
+    }));
+  },
+
   undo() {
-    const { undoStack, boardId, applyOps } = get();
+    const { undoStack, applyOps } = get();
     const entry = undoStack[undoStack.length - 1];
     if (!entry) return;
+
+    // An agent transaction has an owner, and it is the run. Undoing it as a raw
+    // inverse would leave the run's RevertedElementIDs — the thing the outcome
+    // card reads — still claiming the work stands.
+    if (entry.agentRunId) {
+      const ids = Array.from(new Set(entry.ops.map((op) => op.elementId)));
+      expectRunRevert(entry.agentRunId);
+      set((s) => ({
+        undoStack: s.undoStack.slice(0, -1),
+        redoStack: [...s.redoStack, { ...entry, runReverted: true }],
+      }));
+      void import('../agent/agentStore').then(({ revertRunElements }) =>
+        revertRunElements(entry.agentRunId!, ids),
+      );
+      return;
+    }
+
     // Replay each op's undoChanges, in reverse order (§9.5).
     const inverse: Op[] = [...entry.ops].reverse().map((op) => invertOp(op));
     applyOps(inverse);
@@ -250,19 +385,29 @@ export const useBoard = create<BoardState>((set, get) => ({
       undoStack: s.undoStack.slice(0, -1),
       redoStack: [...s.redoStack, entry],
     }));
-    api.applyTransaction(boardId, clientId, inverse).catch(() => get().refreshBoard());
+    api.applyTransaction(entry.boardId, clientId, inverse).catch(() => get().refreshBoard());
   },
 
   redo() {
-    const { redoStack, boardId, applyOps } = get();
+    const { redoStack, applyOps } = get();
     const entry = redoStack[redoStack.length - 1];
     if (!entry) return;
+
+    // Refused, by name. Re-applying would put the run's work back on the board
+    // while the run itself still recorded it as reverted — after which the
+    // outcome card's Undo short-circuits and there is no way left to remove it
+    // except by hand. Retry on the run is the honest way to get it back.
+    if (entry.runReverted) {
+      toast.info(t('undo.agentRedoRefused'));
+      return;
+    }
+
     applyOps(entry.ops);
     set((s) => ({
       redoStack: s.redoStack.slice(0, -1),
       undoStack: [...s.undoStack, entry],
     }));
-    api.applyTransaction(boardId, clientId, entry.ops).catch(() => get().refreshBoard());
+    api.applyTransaction(entry.boardId, clientId, entry.ops).catch(() => get().refreshBoard());
   },
 
   select(ids, additive = false) {

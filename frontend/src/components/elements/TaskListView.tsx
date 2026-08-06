@@ -2,10 +2,10 @@
 // indentation for subtasks, inline add, due dates, and reminders. Every
 // toggle/edit is one transaction, so undo works per interaction. Reminder
 // delivery is the backend sweep: reminderAt (RFC3339) → notification.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { QElement } from '../../api/types';
 import { currentSub } from '../../auth/keycloak';
-import { formatDate } from '../../i18n';
+import { formatDate, useT } from '../../i18n';
 import { dirAttr, elementDir } from '../../lib/direction';
 import { createOp, deleteOp, updateOp, useBoard } from '../../store/boardStore';
 import { useLocalization } from '../../store/settingsStore';
@@ -13,7 +13,9 @@ import { useUserNames } from '../../store/userNames';
 import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon, UserPlusIcon } from '../Icons';
 
 export function TaskListView({ element }: { element: QElement }) {
-  const { elements, commitTransaction } = useBoard();
+  const elements = useBoard((s) => s.elements);
+  const commitTransaction = useBoard((s) => s.commitTransaction);
+  const t = useT();
   const [title, setTitle] = useState<string | null>(null);
   const [newTask, setNewTask] = useState('');
 
@@ -45,8 +47,9 @@ export function TaskListView({ element }: { element: QElement }) {
       <input
         className="tl-title"
         dir={dir}
+        aria-label={t('task.list')}
         value={title ?? element.content?.title ?? ''}
-        placeholder="To-do list"
+        placeholder={t('task.list')}
         onChange={(e) => setTitle(e.target.value)}
         onBlur={() => {
           if (title !== null && title !== element.content?.title) {
@@ -62,7 +65,8 @@ export function TaskListView({ element }: { element: QElement }) {
       <input
         className="task-add"
         dir={dir}
-        placeholder="+ Add a task"
+        aria-label={t('task.add')}
+        placeholder={`+ ${t('task.add')}`}
         value={newTask}
         onChange={(e) => setNewTask(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') addTask(); }}
@@ -74,6 +78,10 @@ export function TaskListView({ element }: { element: QElement }) {
 
 function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' }) {
   const commitTransaction = useBoard((s) => s.commitTransaction);
+  const t = useT();
+  // The checkbox announces the task it belongs to by pointing at the text
+  // field's id — otherwise a to-do list reads as "button, edit, button, button".
+  const textId = useId();
   const [text, setText] = useState<string | null>(null);
   const [datePop, setDatePop] = useState<{ x: number; y: number } | null>(null);
   const [assignPop, setAssignPop] = useState<{ x: number; y: number } | null>(null);
@@ -101,39 +109,67 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
 
   return (
     <>
-      <div className={`task-row${done ? ' done' : ''}`} style={{ paddingLeft: indent * 22 }}>
+      {/* aria-level carries the depth. It used to be conveyed only by
+          paddingLeft, which is invisible to assistive technology and physically
+          left-handed on a bilingual product. */}
+      <div
+        className={`task-row${done ? ' done' : ''}`}
+        style={{ paddingInlineStart: indent * 22 }}
+        aria-level={indent + 1}
+      >
         <button
           className={`task-check${done ? ' done' : ''}`}
+          role="checkbox"
+          aria-checked={done}
+          aria-labelledby={textId}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => void commitTransaction([updateOp(task, { content: { done: !done } })])}
         >
           <CheckIcon size={11} />
         </button>
         <input
+          id={textId}
           className="task-text"
           dir={dir}
+          aria-label={t('task.item')}
+          title={t('task.indentHint')}
           value={text ?? task.content?.text ?? ''}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => {
-            const t = text?.trim();
-            if (text !== null && t !== task.content?.text) {
-              if (t === '') void commitTransaction([deleteOp(task)]);
-              else void commitTransaction([updateOp(task, { content: { text: t } })]);
+            const trimmed = text?.trim();
+            if (text !== null && trimmed !== task.content?.text) {
+              if (trimmed === '') void commitTransaction([deleteOp(task)]);
+              else void commitTransaction([updateOp(task, { content: { text: trimmed } })]);
             }
             setText(null);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            if (e.key === 'Tab') {
-              // Tab indents, Shift+Tab outdents (§4.11).
+            // WCAG 2.1.2, Level A. Tab used to indent and Shift+Tab outdent,
+            // with preventDefault() running BEFORE the 0..4 clamp — so at
+            // indent 0 Shift+Tab was swallowed and at indent 4 Tab was, and
+            // focus could not leave the field by keyboard at all. The exits
+            // were a mouse click elsewhere or closing the tab, on the element
+            // type a production board is mostly made of.
+            //
+            // Indent/outdent moved to Alt+arrow, which no browser reserves, and
+            // Tab is Tab again. The arrows are logical, not physical: in an RTL
+            // list ArrowLeft still means "one level deeper" because it points
+            // the way reading runs.
+            if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+              const rtl = (e.currentTarget.ownerDocument.dir === 'rtl')
+                || getComputedStyle(e.currentTarget).direction === 'rtl';
+              const deeper = rtl ? e.key === 'ArrowLeft' : e.key === 'ArrowRight';
+              const next = Math.max(0, Math.min(4, indent + (deeper ? 1 : -1)));
+              if (next === indent) return;
               e.preventDefault();
-              const next = Math.max(0, Math.min(4, indent + (e.shiftKey ? -1 : 1)));
-              if (next !== indent) void commitTransaction([updateOp(task, { content: { indent: next } })]);
+              void commitTransaction([updateOp(task, { content: { indent: next } })]);
             }
           }}
         />
         <button
-          title="Due date & reminder"
+          title={t('task.due')}
+          aria-label={t('task.due')}
           className="task-date-btn"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -144,7 +180,8 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
           <CalendarIcon size={13} />
         </button>
         <button
-          title="Assign to…"
+          title={t('task.assign')}
+          aria-label={t('task.assign')}
           className="task-date-btn"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -155,7 +192,8 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
           <UserPlusIcon size={13} />
         </button>
         <button
-          title="Delete task"
+          title={t('task.delete')}
+          aria-label={t('task.delete')}
           className="task-del"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => void commitTransaction([deleteOp(task)])}
@@ -165,7 +203,7 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
       </div>
 
       {(dueDate || reminderAt || assigneeId) && (
-        <div className="task-meta" style={{ marginLeft: 27 + indent * 22 }}>
+        <div className="task-meta" style={{ marginInlineStart: 27 + indent * 22 }}>
           {dueDate && (
             <button className={`task-chip${dueClass}`} onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
@@ -217,9 +255,10 @@ function TaskRow({ task, dir }: { task: QElement; dir: 'auto' | 'ltr' | 'rtl' })
 // people who can actually see the task. Assigning writes content.assigneeId;
 // the server notifies the assignee (§4.11).
 function AssigneePopover({ task, x, y, onClose }: { task: QElement; x: number; y: number; onClose: () => void }) {
-  const { elements, boardId, commitTransaction } = useBoard();
+  const t = useT();
+  const acl = useBoard((s) => s.elements[s.boardId]?.acl);
+  const commitTransaction = useBoard((s) => s.commitTransaction);
   const users = useUserNames((s) => s.users);
-  const acl = elements[boardId]?.acl;
   const subs = useMemo(
     () => Array.from(new Set([acl?.ownerId, ...(acl?.editors ?? []), currentSub()].filter(Boolean))) as string[],
     [acl],
@@ -235,7 +274,7 @@ function AssigneePopover({ task, x, y, onClose }: { task: QElement; x: number; y
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 219 }} onPointerDown={(e) => { e.stopPropagation(); onClose(); }} />
       <div className="task-date-pop" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
-        <label>ASSIGN TO</label>
+        <label>{t('task.assignTo')}</label>
         {subs.map((sub) => (
           <button
             key={sub}
@@ -247,7 +286,7 @@ function AssigneePopover({ task, x, y, onClose }: { task: QElement; x: number; y
           </button>
         ))}
         {task.content?.assigneeId && (
-          <button className="tdp-clear" onClick={() => assign(null)}>Unassign</button>
+          <button className="tdp-clear" onClick={() => assign(null)}>{t('task.unassign')}</button>
         )}
       </div>
     </>
@@ -264,6 +303,7 @@ function toLocalInput(iso: string): string {
 }
 
 function TaskDatePopover({ task, x, y, onClose }: { task: QElement; x: number; y: number; onClose: () => void }) {
+  const t = useT();
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [due, setDue] = useState((task.content?.dueDate as string) || '');
   const [remind, setRemind] = useState(toLocalInput((task.content?.reminderAt as string) || ''));
@@ -281,16 +321,16 @@ function TaskDatePopover({ task, x, y, onClose }: { task: QElement; x: number; y
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 219 }} onPointerDown={(e) => { e.stopPropagation(); onClose(); }} />
       <div className="task-date-pop" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
-        <label>DUE DATE</label>
+        <label>{t('task.dueDate')}</label>
         <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-        <label>REMINDER</label>
+        <label>{t('task.reminder')}</label>
         <input type="datetime-local" value={remind} onChange={(e) => setRemind(e.target.value)} />
         {(due || remind) && (
-          <button className="tdp-clear" onClick={() => { setDue(''); setRemind(''); }}>Clear</button>
+          <button className="tdp-clear" onClick={() => { setDue(''); setRemind(''); }}>{t('task.clear')}</button>
         )}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn-quiet" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={save}>Save</button>
+          <button className="btn-quiet" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn-primary" onClick={save}>{t('task.save')}</button>
         </div>
       </div>
     </>

@@ -49,6 +49,13 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npx tsc --noEmit
+      # There was no linter in this job at all, while the tree carried
+      # eslint-disable comments suppressing rules nothing had run in a very
+      # long time. The accessibility rules are the reason this step exists:
+      # a clickable span or an unnamed control is caught here, statically, at
+      # no runtime cost.
+      - name: Lint
+        run: npx eslint src
       - name: Test
         run: npx vitest run --passWithNoTests
       - name: Build

@@ -98,6 +98,15 @@ type Request struct {
 	MaxTokens int
 	// Label identifies the call site in telemetry and in fixture lookup.
 	Label string
+	// Tier is which model policy this call site wants — fast for reading and
+	// classifying, strong for authoring and judging. Empty means strong, so a
+	// caller written before routing existed keeps exactly its old behaviour.
+	//
+	// Label was already set at every call site and read by nothing. Tier is the
+	// field a Router can actually dispatch on; the two travel together because
+	// "which policy" and "which phase" are the same question asked of cost and of
+	// capability.
+	Tier Tier
 }
 
 // Response is a completed call.
@@ -110,20 +119,97 @@ type Response struct {
 
 // Usage is spend for one call, in provider-reported units.
 type Usage struct {
-	InputTokens  int     `bson:"inputTokens"  json:"inputTokens"`
-	OutputTokens int     `bson:"outputTokens" json:"outputTokens"`
-	CachedTokens int     `bson:"cachedTokens" json:"cachedTokens"`
-	CostUSD      float64 `bson:"costUsd"      json:"costUsd"`
-	Calls        int     `bson:"calls"        json:"calls"`
+	InputTokens  int `bson:"inputTokens"  json:"inputTokens"`
+	OutputTokens int `bson:"outputTokens" json:"outputTokens"`
+	CachedTokens int `bson:"cachedTokens" json:"cachedTokens"`
+	// CacheWriteTokens is the prefix this call PUT into the cache, billed above
+	// the base input rate and reported by the API separately from both of the
+	// fields above. Counted because it was not: see Price.CacheWritePer1M.
+	CacheWriteTokens int     `bson:"cacheWriteTokens,omitempty" json:"cacheWriteTokens,omitempty"`
+	CostUSD          float64 `bson:"costUsd"      json:"costUsd"`
+	// Calls is how many times a provider was actually asked. Every provider sets
+	// it to 1 on the Usage it returns; only the accumulators below carry more.
+	Calls int `bson:"calls" json:"calls"`
+	// Phases is spend broken out by the tier and call site that produced it,
+	// keyed "<tier>" and "<tier>:<phase>".
+	//
+	// One total for a whole run cannot answer the question the review turn
+	// raises every time it fires — is a second opinion worth what it costs — and
+	// that question is the whole justification for paying for one. Attributed by
+	// the Router at the single seam every call passes through, so a call site
+	// that forgets to account for itself is not expressible.
+	Phases map[string]Usage `bson:"phases,omitempty" json:"phases,omitempty"`
 }
 
-// Add accumulates one provider call into a running total.
+// phaseOf reduces a Label to the phase it belongs to. Labels carry a step
+// number ("plan.step.7") because they also serve fixture lookup; a per-step
+// breakdown is noise, and a map that grows with the step budget is a map nobody
+// aggregates.
+func phaseOf(label string) string {
+	if i := strings.IndexByte(label, '.'); i > 0 {
+		return label[:i]
+	}
+	return label
+}
+
+// attribute records this call against its tier and phase. Called exactly once,
+// by the Router, on the response it is about to hand back.
+func (u *Usage) attribute(tier Tier, label string) {
+	if u.Phases == nil {
+		u.Phases = map[string]Usage{}
+	}
+	self := Usage{
+		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		CachedTokens: u.CachedTokens, CacheWriteTokens: u.CacheWriteTokens,
+		CostUSD: u.CostUSD, Calls: u.Calls,
+	}
+	if self.Calls == 0 {
+		self.Calls = 1
+	}
+	keys := []string{string(tier)}
+	if phase := phaseOf(label); phase != "" {
+		keys = append(keys, string(tier)+":"+phase)
+	}
+	for _, k := range keys {
+		cur := u.Phases[k]
+		cur.InputTokens += self.InputTokens
+		cur.OutputTokens += self.OutputTokens
+		cur.CachedTokens += self.CachedTokens
+		cur.CacheWriteTokens += self.CacheWriteTokens
+		cur.CostUSD += self.CostUSD
+		cur.Calls += self.Calls
+		u.Phases[k] = cur
+	}
+}
+
+// Add folds one Usage into a running total — a single call, or another total.
+//
+// Calls was `u.Calls++`, which counted the Add rather than the call. The planner
+// adds once per turn and the service then adds the planner's whole total exactly
+// once, so every run in the database reported calls:1 no matter how many turns
+// it took. That is the one number that would have made the step starvation
+// visible while it was happening, and it read as a constant.
 func (u *Usage) Add(o Usage) {
 	u.InputTokens += o.InputTokens
 	u.OutputTokens += o.OutputTokens
 	u.CachedTokens += o.CachedTokens
+	u.CacheWriteTokens += o.CacheWriteTokens
 	u.CostUSD += o.CostUSD
-	u.Calls++
+	u.Calls += o.Calls
+	// The per-phase breakdown folds the same way the totals do, or a run's
+	// phases would report only whatever the last Add happened to carry.
+	for k, v := range o.Phases {
+		if u.Phases == nil {
+			u.Phases = map[string]Usage{}
+		}
+		cur := u.Phases[k]
+		cur.InputTokens += v.InputTokens
+		cur.OutputTokens += v.OutputTokens
+		cur.CachedTokens += v.CachedTokens
+		cur.CostUSD += v.CostUSD
+		cur.Calls += v.Calls
+		u.Phases[k] = cur
+	}
 }
 
 // Provider is the model gateway. Implementations must not perform
@@ -161,6 +247,20 @@ type Price struct {
 	OutputPer1M float64
 	// CachedPer1M is the cache-read rate, roughly a tenth of input.
 	CachedPer1M float64
+	// CacheWritePer1M is what it costs to PUT the prefix in the cache, and it is
+	// ABOVE the base input rate — 1.25x on Anthropic's five-minute TTL.
+	//
+	// SC2: this term did not exist, and the ledger was silently short by it on
+	// every run. The API reports input_tokens exclusive of both cache reads and
+	// cache writes, so the first turn of every run wrote the ~10.8k-token prefix
+	// and recorded it as $0. That figure is what MaxCostUSD is checked against,
+	// what the daily cap sums, and what the audit view shows the person — all
+	// three low, and low by MORE precisely when the cache is doing the most
+	// work, which is the opposite of the direction an operator would guess.
+	//
+	// It also made SC1 unmeasurable: adding cache breakpoints raises real
+	// first-turn spend while a meter blind to cache writes shows it falling.
+	CacheWritePer1M float64
 }
 
 // prices exist so the cost ledger reconciles against the provider invoice. A
@@ -180,10 +280,10 @@ type Price struct {
 //     wrong number, over-stating input by 3x on Flash and making the meter the
 //     user reads plainly false.
 var prices = map[string]Price{
-	"claude-opus-5":    {InputPer1M: 5, OutputPer1M: 25, CachedPer1M: 0.5},
-	"claude-opus-4-8":  {InputPer1M: 5, OutputPer1M: 25, CachedPer1M: 0.5},
-	"claude-sonnet-5":  {InputPer1M: 3, OutputPer1M: 15, CachedPer1M: 0.3},
-	"claude-haiku-4-5": {InputPer1M: 1, OutputPer1M: 5, CachedPer1M: 0.1},
+	"claude-opus-5":    {InputPer1M: 5, OutputPer1M: 25, CachedPer1M: 0.5, CacheWritePer1M: 6.25},
+	"claude-opus-4-8":  {InputPer1M: 5, OutputPer1M: 25, CachedPer1M: 0.5, CacheWritePer1M: 6.25},
+	"claude-sonnet-5":  {InputPer1M: 3, OutputPer1M: 15, CachedPer1M: 0.3, CacheWritePer1M: 3.75},
+	"claude-haiku-4-5": {InputPer1M: 1, OutputPer1M: 5, CachedPer1M: 0.1, CacheWritePer1M: 1.25},
 
 	"gemini-3.6-flash":      {InputPer1M: 1.50, OutputPer1M: 7.50},
 	"gemini-3.5-flash-lite": {InputPer1M: 0.30, OutputPer1M: 2.50},
@@ -240,5 +340,20 @@ func CostUSD(model string, u Usage) (float64, bool) {
 	const perMillion = 1_000_000.0
 	return float64(u.InputTokens)/perMillion*p.InputPer1M +
 		float64(u.OutputTokens)/perMillion*p.OutputPer1M +
-		float64(u.CachedTokens)/perMillion*p.CachedPer1M, true
+		float64(u.CachedTokens)/perMillion*p.CachedPer1M +
+		float64(u.CacheWriteTokens)/perMillion*p.cacheWriteRate(), true
+}
+
+// cacheWriteRate falls back to the documented 1.25x multiple of the input rate
+// when a price entry does not state one.
+//
+// Defaulting rather than zeroing, because zero is exactly the bug: a fourth
+// term that quietly prices at nothing is indistinguishable from the term not
+// existing, which is the state this replaced. A provider that does not report
+// cache writes contributes zero tokens and pays nothing either way.
+func (p Price) cacheWriteRate() float64 {
+	if p.CacheWritePer1M > 0 {
+		return p.CacheWritePer1M
+	}
+	return p.InputPer1M * 1.25
 }

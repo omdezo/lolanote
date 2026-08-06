@@ -56,7 +56,70 @@ type Delegation struct {
 	//   - It is minted per commit and expires with the run.
 	DestinationBoardIDs []string `bson:"destinationBoardIds,omitempty" json:"destinationBoardIds,omitempty"`
 
+	// ContentKeys is the allowlist of content keys this grant may write, keyed
+	// by the originating ActionKind — the compiler's own answer to "what does
+	// this kind produce", carried on the grant so the write path can enforce it
+	// without importing the planner that derives it.
+	//
+	// An allowlist rather than a denylist because content is a schemaless map:
+	// the guard used to name isHome and isTemplate and miss `locked`,
+	// `cloneSourceId` and `agentInstructions` — the standing rules that
+	// CONSTRAIN the agent — and the only thing stopping a run rewriting its own
+	// instructions was that no tool happened to emit that key. Under an
+	// allowlist privileged keys need no enumeration at all: they are excluded
+	// by not being produced.
+	//
+	// A kind ABSENT from the map is refused. That polarity is the whole point —
+	// treating "not declared" as "no restrictions" rebuilds the denylist one
+	// exception at a time.
+	ContentKeys map[string][]string `bson:"contentKeys,omitempty" json:"contentKeys,omitempty"`
+
+	// RequiresApproval says a human must have looked at the plan before this
+	// grant may write, because the BOARD said so — not because the request did.
+	//
+	// Autonomy used to be a property of the request, so whoever pressed the
+	// button decided whether anyone previewed. On a shared board that is the
+	// wrong human: an editor could set autonomy=auto and have thirty
+	// model-chosen actions land on the owner's board with no preview by anyone
+	// but themselves. Admission now resolves the board's policy and downgrades,
+	// and this flag is the write path's independent copy of that decision — so
+	// a later code path that reconstructs a run cannot quietly restore auto.
+	RequiresApproval bool `bson:"requiresApproval,omitempty" json:"requiresApproval,omitempty"`
+
+	// ApprovedBy is the sub of the human who pressed Apply. Empty on an
+	// unattended run, which is exactly the pair RequiresApproval refuses.
+	ApprovedBy string `bson:"approvedBy,omitempty" json:"approvedBy,omitempty"`
+
 	ExpiresAt time.Time `bson:"expiresAt" json:"expiresAt"`
+}
+
+// ContentKeysVerbatim marks a kind whose key set cannot be enumerated because it
+// copies another element's content wholesale. Exactly one kind is like this —
+// duplicate — and it is named here rather than allowed to fall through the
+// "undeclared" branch, because "we cannot tell" and "it writes nothing" are
+// different answers and only one of them is safe to wave through.
+const ContentKeysVerbatim = "*"
+
+// AllowsContentKey reports whether an op compiled from this action kind may
+// write this content key, and whether the caller must still apply its own
+// last-resort checks (true for a verbatim copy, which has no enumerable set).
+func (d *Delegation) AllowsContentKey(kind, key string) (allowed, verbatim bool) {
+	if d == nil {
+		return false, false
+	}
+	keys, declared := d.ContentKeys[kind]
+	if !declared {
+		return false, false
+	}
+	for _, k := range keys {
+		if k == ContentKeysVerbatim {
+			return true, true
+		}
+		if k == key {
+			return true, false
+		}
+	}
+	return false, false
 }
 
 // Roots is every board this grant may write inside: its containment root, plus

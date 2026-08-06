@@ -72,10 +72,23 @@ func (h *Handlers) ChangePassword(c echo.Context) error {
 
 // ExportMyData streams the caller's full data bundle (privacy tab).
 func (h *Handlers) ExportMyData(c echo.Context) error {
-	export, err := h.Account.ExportData(c.Request().Context(), principal(c))
+	ctx := c.Request().Context()
+	p := principal(c)
+	export, err := h.Account.ExportData(ctx, p)
 	if err != nil {
 		return err
 	}
+	// Target is the account rather than any one board: this archive is every
+	// board the person owns, and a row that named one of them would understate
+	// what left by exactly the amount that matters.
+	h.Audit.Emit(ctx, p, &domain.AuditEvent{
+		Action: "data.export",
+		Target: domain.AuditTarget{Type: "account", ID: p.Sub},
+		Meta: map[string]any{
+			"format": "json",
+			"boards": len(export.Boards), "elements": len(export.Elements),
+		},
+	})
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="qomranote-export.json"`)
 	return c.JSON(http.StatusOK, export)
 }

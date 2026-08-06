@@ -103,6 +103,26 @@ func (h *harness) seedBoard(t *testing.T, board string, texts ...string) []strin
 	return ids
 }
 
+// seedColumn puts a column on a board that already exists. The board a person
+// has already organized is the common case, and a fixture that only ever seeds
+// loose cards cannot reach it.
+func (h *harness) seedColumn(t *testing.T, board, id, title string) string {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := h.elements.Insert(context.Background(), &domain.Element{
+		ID: id, Type: domain.TypeColumn,
+		Location: domain.Location{
+			ParentID: board, Section: domain.SectionCanvas,
+			Position: domain.Point{X: 0, Y: 0}, Width: 280, Height: 400,
+		},
+		Content:   domain.Content{"title": title},
+		CreatedBy: owner, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed column: %v", err)
+	}
+	return id
+}
+
 // seedScattered builds a board with loose, overlapping canvas cards — the shape
 // a composition request acts on. Without geometry the arrange tools refuse
 // everything and a tool-choice eval cannot distinguish right from wrong.
@@ -243,7 +263,7 @@ func TestAgent_BuildsNestedStructure(t *testing.T) {
 		t.Fatalf("preview wrote %d transactions; it must write none", n)
 	}
 
-	applied, err := h.svc.Apply(ctx, h.principal, run.ID, nil)
+	applied, err := h.svc.Apply(ctx, h.principal, run.ID, nil, nil)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -399,7 +419,7 @@ func TestAgent_StalePlanRejected(t *testing.T) {
 		t.Fatalf("peer edit: %v", err)
 	}
 
-	if _, err := h.svc.Apply(ctx, h.principal, run.ID, nil); err == nil {
+	if _, err := h.svc.Apply(ctx, h.principal, run.ID, nil, nil); err == nil {
 		t.Fatal("apply must refuse a plan whose targeted elements have changed")
 	}
 	if n := h.txns.Count(); n != 0 {
@@ -440,7 +460,7 @@ func TestAgent_DropCascades(t *testing.T) {
 
 	// Drop the column; the note inside it must go with it, the unrelated note
 	// must survive.
-	applied, err := h.svc.Apply(ctx, h.principal, run.ID, []agent.Adjustment{{Kind: agent.AdjustDrop, Seq: 0}})
+	applied, err := h.svc.Apply(ctx, h.principal, run.ID, []agent.Adjustment{{Kind: agent.AdjustDrop, Seq: 0}}, nil)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -474,7 +494,7 @@ func TestAgent_SecondRunOnSameBoardRejected(t *testing.T) {
 	if _, err := h.svc.Create(ctx, h.principal, agent.CreateRequest{BoardID: boardID, Intent: "again"}); err == nil {
 		t.Fatal("a second run on the same board must be rejected")
 	}
-	if _, err := h.svc.Discard(ctx, h.principal, run.ID); err != nil {
+	if _, err := h.svc.Discard(ctx, h.principal, run.ID, nil); err != nil {
 		t.Fatalf("discard: %v", err)
 	}
 	if _, err := h.runs.ActiveByBoard(ctx, boardID); err == nil {

@@ -55,4 +55,10 @@ const (
 	colNotifications = "notifications"
 	colAgentRuns     = "agent_runs"
 	colAgentEvents   = "agent_events"
+	colAuditEvents   = "audit_events"
+	// One document per run holding that run's last issued journal sequence.
+	// Kept out of the run document because the run is written with ReplaceOne
+	// under a rev CAS: a replace built from a stale in-memory struct would roll
+	// the counter backwards and hand out a sequence the journal already used.
+	colAgentEventSeq = "agent_event_seq"
 )

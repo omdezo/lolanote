@@ -2,9 +2,12 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -33,6 +36,10 @@ type Handlers struct {
 	Comments      *service.CommentService
 	Labels        *service.LabelService
 	Notifications domain.NotificationRepository
+	// Audit records the events whose subject is the REQUEST rather than a
+	// service call — an export is a read, so no service below here has a reason
+	// to know it happened, and it is exactly the read a leaving employee makes.
+	Audit *service.AuditService
 	// Agent is nil when the deployment has no model provider configured; the
 	// routes then report the feature as unavailable rather than failing oddly.
 	Agent      *agent.Service
@@ -180,10 +187,20 @@ func (h *Handlers) ExportBoard(c echo.Context) error {
 	if format == "" {
 		format = "markdown"
 	}
-	body, contentType, err := h.Boards.Export(c.Request().Context(), principal(c), c.Param("id"), format)
+	ctx := c.Request().Context()
+	p := principal(c)
+	body, contentType, err := h.Boards.Export(ctx, p, c.Param("id"), format)
 	if err != nil {
 		return err
 	}
+	// The board leaves the product here, and this route is reachable with nothing
+	// but a share token — so the row records the whole board, bytes included, as
+	// having been taken by whoever the request authenticated as.
+	h.Audit.Emit(ctx, p, &domain.AuditEvent{
+		Action: "data.export",
+		Target: domain.AuditTarget{Type: "board", ID: c.Param("id")},
+		Meta:   map[string]any{"format": format, "bytes": len(body)},
+	})
 	return c.Blob(http.StatusOK, contentType, []byte(body))
 }
 
@@ -206,12 +223,28 @@ type txnRequest struct {
 	Ops      []domain.Op `json:"ops"`
 }
 
+// idempotencyKeyPattern bounds what a client may pin a transaction id to.
+//
+// The key becomes the journal row's _id, so it has to look like an id rather
+// than like a sentence: bounded length, no separators that would make a log line
+// or a query ambiguous.
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
 func (h *Handlers) ApplyTransaction(c echo.Context) error {
 	var req txnRequest
 	if err := c.Bind(&req); err != nil {
 		return domain.ErrValidation
 	}
-	txn, err := h.Txns.Apply(c.Request().Context(), principal(c), req.BoardID, req.ClientID, req.Ops)
+	// A retried POST — an offline queue flushing twice, a flaky connection, a
+	// double-click — used to re-run every op and only then discover it had
+	// already happened, because the journal row was written last. A client that
+	// sends a key gets the first commit back instead of a second one.
+	key := strings.TrimSpace(c.Request().Header.Get("Idempotency-Key"))
+	if key != "" && !idempotencyKeyPattern.MatchString(key) {
+		return fmt.Errorf("%w: Idempotency-Key must be 8-64 characters of A-Z a-z 0-9 _ -", domain.ErrValidation)
+	}
+	txn, err := h.Txns.ApplyWithMeta(c.Request().Context(), principal(c),
+		req.BoardID, req.ClientID, req.Ops, service.TxnMeta{TxnID: key})
 	if err != nil {
 		return err
 	}
@@ -279,11 +312,25 @@ func (h *Handlers) WebSocket(c echo.Context) error {
 
 // ---- local blob driver (dev fallback for R2, same presign contract) ----
 
+// BlobPut is the local driver's stand-in for a presigned PUT.
+//
+// It authorizes the KEY, not just the caller. A valid bearer token was the only
+// check here, which made "presigned" a fiction: the URL is guessable from any
+// element that shows a file, so any account could PUT over somebody else's
+// upload and swap the bytes underneath every card that renders it. R2 signs the
+// key into the URL and so never had this hole; the dev fallback is the default
+// driver (STORAGE_DRIVER defaults to local) and had no equivalent at all.
 func (h *Handlers) BlobPut(c echo.Context) error {
 	if h.Local == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "local storage driver not active")
 	}
+	if h.Uploads == nil {
+		return domain.ErrUnavailable
+	}
 	key := c.Param("*")
+	if err := h.Uploads.AuthorizeUpload(c.Request().Context(), principal(c), key); err != nil {
+		return err
+	}
 	if err := h.Local.Save(key, c.Request().Body); err != nil {
 		return err
 	}

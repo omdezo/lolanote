@@ -2,8 +2,10 @@
 // element(s). Positioned at the pointer like the context menu.
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
+import { ownsEscape, useView } from '../../store/viewStore';
 import { useLabels } from '../../store/labels';
 import { useBoard } from '../../store/boardStore';
+import { useT } from '../../i18n';
 import { CheckIcon, PlusIcon } from '../Icons';
 
 interface PopState {
@@ -35,7 +37,11 @@ export function LabelChips({ labelIds }: { labelIds?: string[] }) {
   );
 }
 
+/** This popover's entry on the shared Escape stack (viewStore.overlays). */
+const OVERLAY = 'label-popover';
+
 export function LabelPopoverHost() {
+  const t = useT();
   const { target, close } = useLabelPopover();
   const { labels, create: createLabel, attach, detach, load } = useLabels();
   const [name, setName] = useState('');
@@ -45,11 +51,21 @@ export function LabelPopoverHost() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!target) return;
+    // On the shared Escape stack, so this popover closing does not also run
+    // every other window-level Escape listener in the app — six surfaces bound
+    // one each, and a single keypress ran all of them.
+    useView.getState().pushOverlay(OVERLAY);
     const onDown = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && ownsEscape(OVERLAY)) { e.stopPropagation(); close(); }
+    };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey); };
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+      useView.getState().popOverlay(OVERLAY);
+    };
   }, [target, close]);
 
   if (!target) return null;
@@ -78,7 +94,8 @@ export function LabelPopoverHost() {
     <div ref={ref} className="label-popover" style={{ left: x, top: y }}>
       <input
         className="label-new-input"
-        placeholder="Create or search labels…"
+        aria-label={t('label.search')}
+        placeholder={t('label.search')}
         value={name}
         autoFocus
         onChange={(e) => setName(e.target.value)}

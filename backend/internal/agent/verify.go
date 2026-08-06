@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"qomranote/backend/internal/domain"
@@ -43,8 +44,14 @@ func Preconditions(p *Plan, scope *BoardScope, task TaskSpec) Verdict {
 	// An unattended run must not destroy anything. The capability is withheld
 	// from the tool catalogue in that mode, so reaching here means something
 	// upstream went wrong — check anyway.
+	//
+	// The words come from ErrDestructiveNeedsReview rather than being retyped
+	// here. That sentinel shipped declared and referenced nowhere while this
+	// site — the one place in the codebase that actually detects the condition
+	// it names — carried its own paraphrase, so the refusal existed twice and
+	// the vocabulary entry existed for nothing.
 	if p.Destructive() && task.Autonomy != AutonomyPreview {
-		v.Fail("consequence.reviewed", "a deletion cannot be applied without review", true)
+		v.Fail("consequence.reviewed", ErrDestructiveNeedsReview.Error(), true)
 	} else {
 		v.Pass("consequence.reviewed")
 	}
@@ -55,6 +62,7 @@ func Preconditions(p *Plan, scope *BoardScope, task TaskSpec) Verdict {
 	// id inert.
 	created := map[string]ActionKind{}
 	scopeOK, refOK, shapeOK := true, true, true
+	templateOK, ruleOK, archivedOK := true, true, true
 	for i, a := range p.Actions {
 		if a.Seq != i {
 			v.Fail("plan.ordered", "actions are not in sequence", true)
@@ -80,10 +88,58 @@ func Preconditions(p *Plan, scope *BoardScope, task TaskSpec) Verdict {
 			}
 		}
 
+		// A parent that EXISTS is not automatically a parent that may hold this.
+		// The tool boundary refuses these while the model can still act; this is
+		// the gate that stops one reaching the board if it ever gets past there.
+		// It shipped without: six columns went inside three other columns, and
+		// six cards were filed into an arrangement the canvas cannot draw.
+		if child := childTypeOf(a, scope); child != domain.TypeUnknown {
+			if parent := parentTypeOf(a, created, scope); !CanHold(parent, child) {
+				v.Fail("containment.legal", fmt.Sprintf(
+					"action %d puts a %s inside a %s, which this board cannot show",
+					a.Seq, child, parent), true)
+				refOK = false
+			}
+		}
+
 		if err := shapeOf(a); err != nil {
 			v.Fail("action.shape", fmt.Sprintf("action %d: %v", a.Seq, err), true)
 			shapeOK = false
 		}
+
+		// Writes into a stencil, and corrections the person already made. Both
+		// are refused at the tool boundary while the model can still act on
+		// them; this is the gate that stops one reaching the board if it ever
+		// gets past there — including through an adjustment, which is the one
+		// path that adds a parent nothing refused at staging time.
+		if s := templateTargetOf(a, scope); s != "" {
+			v.Fail("template.untouched", fmt.Sprintf("action %d writes into template %s", a.Seq, s), true)
+			templateOK = false
+		}
+		// JN17's write refusal, at the same second gate and for the same
+		// reason: an adjustment can hand a plan a parent that staging never
+		// saw, and reorganising a wrapped production destroys the record of
+		// how it was actually run.
+		if s := archivedTargetOf(a, scope); s != "" {
+			v.Fail("archived.untouched", fmt.Sprintf("action %d writes into archived board %s", a.Seq, s), true)
+			archivedOK = false
+		}
+		for _, rule := range scope.LearnedRules {
+			if rule.Matches(a) {
+				v.Fail("memory.respected", fmt.Sprintf("action %d: %s", a.Seq, rule.Refusal()), true)
+				ruleOK = false
+				break
+			}
+		}
+	}
+	if archivedOK {
+		v.Pass("archived.untouched")
+	}
+	if templateOK {
+		v.Pass("template.untouched")
+	}
+	if ruleOK {
+		v.Pass("memory.respected")
 	}
 	if scopeOK {
 		v.Pass("scope.containment")
@@ -138,111 +194,28 @@ func Preconditions(p *Plan, scope *BoardScope, task TaskSpec) Verdict {
 }
 
 // shapeOf checks that an action carries the fields its kind requires.
+//
+// The per-kind rules live on the ActionSpec registry, so validation cannot drift
+// from compilation the way it did when both were hand-written switches. An
+// unregistered kind is refused rather than defaulted: a kind nothing knows how
+// to check is one nothing knows how to compile either.
 func shapeOf(a Action) error {
-	switch a.Kind {
-	case ActCreateBoard, ActCreateColumn:
-		if a.Title == "" {
-			return fmt.Errorf("%s needs a title", a.Kind)
-		}
-	case ActCreateNote:
-		if a.Text == "" {
-			return fmt.Errorf("a note needs text")
-		}
-	case ActCreateTodo:
-		if a.Title == "" || len(a.Tasks) == 0 {
-			return fmt.Errorf("a to-do list needs a title and tasks")
-		}
-	case ActCreateLink:
-		if a.URL == "" {
-			return fmt.Errorf("a link needs a URL")
-		}
-	case ActMove:
-		if a.ParentID == "" {
-			return fmt.Errorf("a move needs a destination")
-		}
-		if a.ParentID == a.ElementID {
-			return fmt.Errorf("an element cannot contain itself")
-		}
-	case ActRename:
-		if a.Title == "" {
-			return fmt.Errorf("a rename needs a title")
-		}
-	case ActSetText:
-		if a.Text == "" {
-			return fmt.Errorf("a rewrite needs text")
-		}
-	case ActDelete:
-		if a.ElementID == "" {
-			return fmt.Errorf("a deletion needs a target")
-		}
-	case ActApplyLabel:
-		if a.ElementID == "" || a.LabelID == "" {
-			return fmt.Errorf("tagging needs an element and a label")
-		}
-	case ActSetColor:
-		// An empty colour is the "default" swatch, so only the target is
-		// required — clearing a colour is a legitimate edit.
-		if a.ElementID == "" {
-			return fmt.Errorf("colouring needs a target")
-		}
-	case ActSetTask:
-		if a.ElementID == "" {
-			return fmt.Errorf("ticking needs a target")
-		}
-	case ActSetAssignee:
-		if a.ElementID == "" || a.AssigneeID == "" {
-			return fmt.Errorf("assigning needs a task and a person")
-		}
-	case ActSetReminder:
-		if a.ElementID == "" || a.RemindAt == "" {
-			return fmt.Errorf("a reminder needs a task and a time")
-		}
-	case ActResize:
-		if a.ElementID == "" || a.Position == nil || a.Position.Width <= 0 {
-			return fmt.Errorf("resizing needs a target and a width")
-		}
-	case ActCreateHeading:
-		if a.Text == "" {
-			return fmt.Errorf("a heading needs text")
-		}
-	case ActPlace:
-		if a.ElementID == "" || a.Position == nil {
-			return fmt.Errorf("placing needs a target and a position")
-		}
-	case ActComment:
-		if a.Text == "" {
-			return fmt.Errorf("a comment needs something to say")
-		}
-	case ActCloneHere:
-		if a.FromID == "" || a.ParentID == "" {
-			return fmt.Errorf("a clone needs a source and a destination")
-		}
-	case ActConnect:
-		if a.FromID == "" || a.ToID == "" {
-			return fmt.Errorf("a connection needs both ends")
-		}
-		if a.FromID == a.ToID {
-			return fmt.Errorf("an element cannot be connected to itself")
-		}
-	case ActCreateTable:
-		if len(a.Rows) < 2 {
-			return fmt.Errorf("a table needs a header row and at least one data row")
-		}
-		width := len(a.Rows[0])
-		for i, r := range a.Rows {
-			if len(r) != width {
-				return fmt.Errorf("table row %d has %d cells, header has %d", i, len(r), width)
-			}
-		}
-	default:
+	spec, ok := SpecFor(a.Kind)
+	if !ok {
 		return fmt.Errorf("unknown action %q", a.Kind)
 	}
-	return nil
+	if spec.Validate == nil {
+		return nil
+	}
+	return spec.Validate(a)
 }
 
 // plannedDepth measures how deep the plan's own containment chains go.
 func plannedDepth(p *Plan, scope *BoardScope) int {
-	depth := map[string]int{scope.Board.ID: 0}
+	depth := map[string]int{}
+	if scope != nil && scope.Board != nil {
+		depth[scope.Board.ID] = 0
+	}
 	max := 0
 	for _, a := range p.Actions {
 		if !a.Kind.Creates() {
@@ -265,9 +238,18 @@ func plannedDepth(p *Plan, scope *BoardScope) int {
 func CheckFingerprint(ctx context.Context, elements domain.ElementRepository, p *Plan) ([]string, error) {
 	var stale []string
 	for id, want := range p.Fingerprint {
-		// The membership entry is checked by the caller against a freshly
-		// compiled scope, not by reading an element that does not exist.
-		if id == membershipKey {
+		// Membership entries are checked by the caller against a freshly
+		// compiled scope, not by reading an element that does not exist. There
+		// is one per destination container now, so this is a prefix test rather
+		// than an equality test against a single sentinel key.
+		//
+		// The prefix is the BARE word, without the separator, so it also catches
+		// the single "__members" entry plans proposed before the partition
+		// landed still carry. Matching only "__members:" would send that key
+		// down to elements.Get, which cannot find it, and every plan left open
+		// across the deploy would come back stale with a sentinel in its list of
+		// changed elements.
+		if strings.HasPrefix(id, membershipPrefix) {
 			continue
 		}
 		el, err := elements.Get(ctx, id)
@@ -283,15 +265,59 @@ func CheckFingerprint(ctx context.Context, elements domain.ElementRepository, p 
 	return stale, nil
 }
 
-// CheckMembership reports whether the board gained or lost elements since the
-// plan was made. Separate from CheckFingerprint because it compares against a
-// recompiled scope rather than against individual elements.
-func CheckMembership(p *Plan, fresh *BoardScope) bool {
-	want, ok := p.Fingerprint[membershipKey]
-	if !ok || fresh == nil {
-		return true // plans made before this existed are not retroactively stale
+// fingerprintFor narrows the original plan's fingerprint to what the adjusted
+// plan still touches.
+//
+// The membership entry always survives: the board gaining or losing items
+// invalidates any plan, whichever rows the person kept. Everything else is
+// dropped along with the action that named it, which is what lets somebody
+// remove the one row that went stale and apply the rest — before this, a single
+// element moving under a plan made every subsequent Apply fail identically and
+// the only exit was to discard the whole run.
+func fingerprintFor(original, effective *Plan) map[string]string {
+	if original == nil || len(original.Fingerprint) == 0 || effective == nil {
+		return nil
 	}
-	return want == fresh.membershipHash()
+	keep := map[string]bool{}
+	for _, id := range effective.TargetIDs() {
+		keep[id] = true
+	}
+	out := make(map[string]string, len(keep)+1)
+	for id, want := range original.Fingerprint {
+		if keep[id] || strings.HasPrefix(id, membershipPrefix) {
+			out[id] = want
+		}
+	}
+	return out
+}
+
+// CheckMembership reports whether any container this plan writes into gained or
+// lost elements since the plan was made. Separate from CheckFingerprint because
+// it compares against a recompiled scope rather than against individual
+// elements.
+//
+// Per destination, not per workspace: a create or delete somewhere else in the
+// subtree cannot orphan a card inside a grouping this plan never touches, and
+// treating it as staleness made a thirty-action plan on a shared board nearly
+// impossible to apply.
+func CheckMembership(p *Plan, fresh *BoardScope) bool {
+	if p == nil || fresh == nil {
+		return true
+	}
+	for key, want := range p.Fingerprint {
+		if !strings.HasPrefix(key, membershipKey) {
+			continue
+		}
+		parent := strings.TrimPrefix(key, membershipKey)
+		// A destination this plan creates has no live child set yet, and a
+		// container read at planning time but elided from the recompiled scope
+		// would otherwise read as "emptied". Only a container present in both
+		// compilations is comparable; anything else is checked per-element.
+		if got, ok := fresh.MemberSets[parent]; ok && got != want {
+			return false
+		}
+	}
+	return true
 }
 
 // Postconditions re-reads the board after commit and checks that reality
@@ -329,8 +355,11 @@ func Postconditions(ctx context.Context, elements domain.ElementRepository, p *P
 				createdOK = false
 				continue
 			}
-			if el.Type != a.Kind.ElementType() {
-				v.Fail("created.exist", fmt.Sprintf("%s is a %s, not a %s", a.ElementID, el.Type, a.Kind.ElementType()), true)
+			// Action.Type, not Kind.ElementType: place_file's output depends on
+			// the attachment, and checking the kind's default would fail every
+			// correctly-compiled FILE card.
+			if el.Type != a.Type() {
+				v.Fail("created.exist", fmt.Sprintf("%s is a %s, not a %s", a.ElementID, el.Type, a.Type()), true)
 				createdOK = false
 			}
 			if el.Location.ParentID != a.ParentID {
@@ -416,23 +445,43 @@ func aclHash(acl *domain.ACL) string {
 	return s
 }
 
-// ApplyAdjustments folds the human's typed edits into a plan and returns the
-// effective plan, resequenced.
+// ApplyAdjustmentsDetailed folds the human's typed edits into a plan and returns
+// the effective plan, resequenced, alongside the PROVENANCE of every dropped row.
 //
 // Every adjustment is addressed by an action's position in THIS plan, so an
 // adjustment can only rearrange what was already proposed — it cannot introduce
 // anything. Dropping a container also drops whatever the plan put inside it,
 // because the children would otherwise have no parent.
-func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Plan {
+//
+// The provenance return is what stops the correction miner learning a lie. The
+// cascade used to write into the same `dropped` map as the person's own click,
+// so ten missing actions came out of one gesture and nothing downstream could
+// tell which one the human had actually made. It also makes the review list
+// honest: dropping a container silently removed its nine children with no row
+// saying so, which is why a reviewer's drop was a bigger act than they knew.
+func ApplyAdjustmentsDetailed(p *Plan, adjustments []Adjustment, scope *BoardScope) (*Plan, []DropRecord) {
 	dropped := map[int]bool{}
+	// killedBy records which explicit drop each cascaded row died with, walking
+	// up through intermediate cascades so a grandchild is attributed to the
+	// click rather than to its parent row.
+	killedBy := map[int]int{}
 	retitle := map[int]string{}
 	retext := map[int]string{}
 
+	reparent := map[int]string{}
 	for _, adj := range adjustments {
 		if adj.Seq < 0 || adj.Seq >= len(p.Actions) {
 			continue
 		}
 		switch adj.Kind {
+		case AdjustReparent:
+			// Containment, exactly as for a model-supplied parent: a person may
+			// redirect a change to somewhere on this board, and nowhere else.
+			// The id arrives from a client and is therefore no more trusted
+			// than one the model proposed.
+			if dest, ok := resolveDestination(adj.Value, p, scope); ok {
+				reparent[adj.Seq] = dest
+			}
 		case AdjustDrop:
 			dropped[adj.Seq] = true
 		case AdjustRetitle:
@@ -449,10 +498,21 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 	}
 
 	// Cascade: an action parented to a dropped create cannot survive it.
-	deadParents := map[string]bool{}
+	//
+	// Computed against the EFFECTIVE parent, not the one the model proposed. A
+	// person can now redirect a card into a column and then drop that column in
+	// the same review, and reading the original parent here left the card
+	// destined for a container that was no longer going to exist.
+	parentOf := func(i int) string {
+		if v, ok := reparent[i]; ok {
+			return v
+		}
+		return p.Actions[i].ParentID
+	}
+	deadParents := map[string]int{} // created id -> the seq whose removal killed it
 	for seq := range dropped {
-		if p.Actions[seq].Kind.Creates() {
-			deadParents[p.Actions[seq].ElementID] = true
+		for _, id := range p.Actions[seq].CreatedIDs() {
+			deadParents[id] = seq
 		}
 	}
 	for changed := true; changed; {
@@ -461,23 +521,50 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 			if dropped[i] {
 				continue
 			}
-			if deadParents[a.ParentID] {
-				dropped[i] = true
-				if a.Kind.Creates() {
-					deadParents[a.ElementID] = true
-				}
-				changed = true
+			killer, dead := deadParents[parentOf(i)]
+			if !dead {
+				continue
 			}
+			dropped[i] = true
+			// Attribute to the CLICK, not to the intermediate row: a card inside
+			// a column inside a dropped board is one decision deep, however many
+			// levels of plan sit between them.
+			if root, ok := killedBy[killer]; ok {
+				killer = root
+			}
+			killedBy[i] = killer
+			for _, id := range a.CreatedIDs() {
+				deadParents[id] = i
+			}
+			changed = true
 		}
 	}
 
-	// NewLabels rides along: dropping an action must not silently drop the
-	// vocabulary its siblings still reference, or apply would compile ops
-	// pointing at labels that were never created.
-	out := &Plan{
-		Summary: p.Summary, Notes: p.Notes,
-		Fingerprint: p.Fingerprint, NewLabels: p.NewLabels, NewComments: p.NewComments,
+	drops := make([]DropRecord, 0, len(dropped))
+	for i := range p.Actions {
+		if !dropped[i] {
+			continue
+		}
+		rec := DropRecord{Seq: i, Kind: p.Actions[i].Kind, Cause: DropExplicit, ParentSeq: -1}
+		if parent, cascaded := killedBy[i]; cascaded {
+			rec.Cause, rec.ParentSeq = DropCascade, parent
+		}
+		drops = append(drops, rec)
 	}
+
+	// Everything about the plan EXCEPT its actions survives an adjustment, and
+	// it survives by being copied wholesale rather than field by field.
+	//
+	// This was an enumerated literal, and enumerations rot. It had already lost
+	// NewLabels once — apply then compiled ops referencing labels that were
+	// never created. Still missing when that was fixed: Quarantined (an adjusted
+	// plan would forget that board content had tried to steer the run, and could
+	// then auto-apply), Destinations (apply would not know to check the human's
+	// rights on the other board), and Question. Copying the struct means the
+	// next field added is carried without anyone remembering to come here.
+	copied := *p
+	out := &copied
+	out.Actions = nil
 	for i, a := range p.Actions {
 		if dropped[i] {
 			continue
@@ -485,6 +572,18 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 		if v, ok := retitle[i]; ok {
 			a.Title = v
 			a.Summary = "Renamed to “" + v + "”"
+		}
+		if v, ok := reparent[i]; ok {
+			a.ParentID = v
+			// A redirected element loses any canvas coordinate the layout pass
+			// gave it: the two answers to "where" are mutually exclusive, and
+			// LayoutPlan below recomputes whichever one still applies.
+			a.Position = nil
+			if v == scope.Board.ID {
+				a.Section = string(domain.SectionCanvas)
+			} else {
+				a.Section = ""
+			}
 		}
 		if v, ok := retext[i]; ok {
 			a.Text = v
@@ -496,6 +595,40 @@ func ApplyAdjustments(p *Plan, adjustments []Adjustment, scope *BoardScope) *Pla
 		out.Actions = append(out.Actions, a)
 	}
 	LayoutPlan(out, scope)
+	LabelDestinations(out, scope)
+	OrderPlan(out, scope)
 	out.EnsureShape()
-	return out
+	return out, drops
+}
+
+// resolveDestination validates a human-chosen parent for a plan action.
+//
+// The same containment rule the model is held to: a destination is either an
+// element the server itself compiled into scope, or a container this plan
+// creates earlier in its own sequence, or the board itself. An id from anywhere
+// else is inert — a person's client is not more trusted than the model, because
+// the request that carries it is equally forgeable.
+func resolveDestination(id string, p *Plan, scope *BoardScope) (string, bool) {
+	if id == "" || scope == nil || scope.Board == nil {
+		return "", false
+	}
+	if id == scope.Board.ID {
+		return id, true
+	}
+	for _, a := range p.Actions {
+		for _, made := range a.CreatedIDs() {
+			if made != id {
+				continue
+			}
+			if !a.Kind.Container() {
+				return "", false // a note cannot hold a card
+			}
+			return id, true
+		}
+	}
+	el, ok := scope.Elements[id]
+	if !ok || !el.Type.IsContainer() {
+		return "", false
+	}
+	return id, true
 }

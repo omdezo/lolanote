@@ -2,7 +2,7 @@
 // share token (for boards opened via share links) rides along when present.
 import { forceRefreshToken, getToken, isAuthenticated } from '../auth/keycloak';
 import type {
-  AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent, AgentAuditEntry, AgentDrift, AgentRun, AgentScope,
+  AgentAdjustment, AgentAutonomy, AgentCapabilities, AgentEvent, AgentAuditEntry, AgentBoardState, AgentRun, AgentScope,
   BoardView, Label, LinkMetadata, Op, PresignResult, QComment, QElement,
   QNotification, ShareState, TrashItem, Txn, User, UserSettings,
 } from './types';
@@ -19,9 +19,9 @@ export function getShareToken(): string { return shareToken; }
 let sharePassword = '';
 export function setSharePassword(pw: string) { sharePassword = pw; }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>): Promise<T> {
   const doFetch = (token: string) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extra };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (shareToken) headers['X-Share-Token'] = shareToken;
@@ -60,6 +60,17 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+// The server accepts 8-64 characters of [A-Za-z0-9_-]; a UUID's hex and hyphens
+// are inside that set. Falls back to random characters where randomUUID is
+// missing rather than sending nothing, because a request with no key silently
+// loses the guarantee the header exists to provide.
+function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 36).toString(36)).join('');
+}
+
 export const api = {
   me: () => request<User>('GET', '/me'),
   updateMe: (patch: { displayName?: string; email?: string; avatarUrl?: string }) =>
@@ -81,8 +92,22 @@ export const api = {
   useTemplate: (id: string, boardId: string, position: { x: number; y: number }) =>
     request<QElement>('POST', `/templates/${id}/use`, { boardId, position }),
 
+  // The key is minted HERE, once per call, rather than at each call site.
+  //
+  // The server journals the row before applying, so a second POST carrying the
+  // same key observes the first commit instead of repeating it. Without the
+  // header a retried write — a network blip, a double-click that beats the
+  // optimistic state — re-runs every op: creates fail mid-loop on duplicate
+  // element ids, leaving a partial write with no journal row and no inverse.
+  // The agent path was already safe because it pins its transaction id from the
+  // run; this is the human half.
+  //
+  // Minting inside the client means the 401-refresh retry above reuses the same
+  // key automatically, and no future caller can forget to supply one. A fresh
+  // key per attempt would buy nothing at all.
   applyTransaction: (boardId: string, clientId: string, ops: Op[]) =>
-    request<Txn>('POST', '/transactions', { boardId, clientId, ops }),
+    request<Txn>('POST', '/transactions', { boardId, clientId, ops },
+      { 'Idempotency-Key': newIdempotencyKey() }),
 
   element: (id: string) => request<QElement>('GET', `/elements/${id}`),
   duplicate: (id: string) => request<QElement[]>('POST', `/elements/${id}/duplicate`),
@@ -137,9 +162,36 @@ export const api = {
   // Note what is absent: no call sends ops. The client asks for a run and
   // sends typed adjustments; the server decides what lands on the board.
   agentCapabilities: () => request<AgentCapabilities>('GET', '/agent/capabilities'),
-  agentCreateRun: (body: { boardId: string; intent: string; scope: AgentScope; selectionIds?: string[]; autonomy: AgentAutonomy; attachmentIds?: string[] }) =>
+  agentCreateRun: (body: {
+    boardId: string; intent: string; scope: AgentScope;
+    selectionIds?: string[]; autonomy: AgentAutonomy; attachmentIds?: string[];
+    /** Where the person is looking, in board coordinates, so new content
+     *  lands there instead of at the far edge of a large board. */
+    viewport?: { x: number; y: number; width: number; height: number };
+    /** The label filter on screen right now. Travels for the same reason the
+     *  viewport does: "tidy this up" means the twelve items they can see, not
+     *  the two hundred behind the filter. */
+    activeLabelIds?: string[];
+    /**
+     * Who composed the intent — the composer, or the ambient pill.
+     *
+     * The server labels Continue and Retry itself; only the client can tell a
+     * paragraph somebody wrote from a canned sentence they accepted with one
+     * click, and those two have nothing in common as far as apply rate,
+     * adjustment rate or cost tolerance are concerned. Without it every rate in
+     * every dashboard is computed over a mixed population.
+     */
+    source?: 'typed' | 'hint';
+  }) =>
     request<AgentRun>('POST', '/agent/runs', body),
   agentRun: (id: string) => request<AgentRun>('GET', `/agent/runs/${id}`),
+  // The verdict on a proposed rule, recorded on the RUN and apart from the board
+  // write that saves the text. Save appended a sentence with no run link and
+  // "Not now" set a local flag, so "do people want the rules the agent
+  // proposes" — the direct measure of whether any of the memory work is worth
+  // building — had no answer anywhere.
+  agentAnswerRule: (id: string, accepted: boolean) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/rule`, { accepted }),
   agentRuns: (boardId: string, limit = 10) =>
     request<AgentRun[]>('GET', `/agent/runs?boardId=${boardId}&limit=${limit}`),
   // Cursor-based catch-up after a reconnect: live events ride the board socket.
@@ -147,12 +199,32 @@ export const api = {
     request<AgentEvent[]>('GET', `/agent/runs/${id}/events?since=${since}`),
   agentApply: (id: string, adjustments: AgentAdjustment[]) =>
     request<AgentRun>('POST', `/agent/runs/${id}/apply`, { adjustments }),
-  agentDrift: (boardId: string) => request<AgentDrift | null>('GET', `/agent/boards/${boardId}/drift`),
+  agentBoardState: (boardId: string) =>
+    request<AgentBoardState>('GET', `/agent/boards/${boardId}/state`),
   agentAudit: (boardId: string) => request<AgentAuditEntry[]>('GET', `/agent/boards/${boardId}/audit`),
-  agentRefine: (id: string, note: string) => request<AgentRun>('POST', `/agent/runs/${id}/refine`, { note }),
-  agentDiscard: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/discard`, {}),
+  // The typed edits ride WITH the note. Dropping three rows and then typing
+  // "also make it four columns" used to send only the sentence, so the three
+  // drops vanished and the next plan proposed them again.
+  agentRefine: (id: string, note: string, adjustments: AgentAdjustment[] = []) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/refine`, { note, adjustments }),
+  // The adjustments travel even though nothing will be written. "I dropped
+  // four rows, reparented two, and then gave up" names exactly which
+  // capabilities failed, with typed targets; abandonment is the highest-weight
+  // correction label there is, and it was being discarded in the same set()
+  // call that made this request.
+  agentDiscard: (id: string, adjustments: AgentAdjustment[] = []) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/discard`, { adjustments }),
   agentCancel: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/cancel`, {}),
-  agentRevert: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/revert`, {}),
+  // No ids means the whole run. A subset undoes just those elements and leaves
+  // the rest of the run standing.
+  agentSteer: (id: string, note: string) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/steer`, { note }),
+  agentRetry: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/retry`, {}),
+  // Keep going from what a run left undone. No body: the new run's request is
+  // composed on the server from that run's own unmet list.
+  agentContinue: (id: string) => request<AgentRun>('POST', `/agent/runs/${id}/continue`, {}),
+  agentRevert: (id: string, elementIds?: string[]) =>
+    request<AgentRun>('POST', `/agent/runs/${id}/revert`, { elementIds: elementIds ?? [] }),
 
   notifications: () => request<QNotification[]>('GET', '/notifications'),
   markNotificationsRead: (ids: string[]) => request<void>('POST', '/notifications/read', { ids }),
@@ -187,5 +259,16 @@ export async function uploadFile(file: File): Promise<{ url: string; attachmentI
   const put = await fetch(presigned.uploadUrl, { method: 'PUT', headers, body: file });
   if (!put.ok) throw new ApiError(put.status, 'upload failed');
   await api.completeUpload(presigned.attachmentId);
-  return { url: presigned.publicUrl, attachmentId: presigned.attachmentId };
+  // The element stores an indirection, never the presigned URL.
+  //
+  // presigned.publicUrl is a bearer credential with a seven-day life: it was
+  // written straight into content.url, so anybody who could read the element —
+  // or an export, or a copied card — held a key to the bytes that outlived
+  // every permission change, and on day eight the picture simply vanished from
+  // the board. This route signs a fresh short-lived URL per request behind an
+  // ACL check, so revocation is immediate and nothing expires.
+  return {
+    url: `${BASE}/attachments/${presigned.attachmentId}/blob`,
+    attachmentId: presigned.attachmentId,
+  };
 }

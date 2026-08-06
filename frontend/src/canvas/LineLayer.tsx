@@ -5,14 +5,26 @@
 // endpoint handles (drag to reconnect or drop free), the curve handle
 // (double-click straightens), and a floating toolbar: Color · Start · End ·
 // Label · Dashed · Weight — Milanote's exact line controls.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QElement } from '../api/types';
 import { deleteOp, updateOp, useBoard } from '../store/boardStore';
 import { useView } from '../store/viewStore';
+import { t as translate, useT } from '../i18n';
 import { prompt } from '../components/ui/Prompt';
 import { ColorIcon, DashIcon, LabelIcon, LineEndIcon, LineStartIcon, WeightIcon } from '../components/Icons';
 
-const EXTENT = 100_000; // virtual canvas half-extent for the SVG surface
+/**
+ * How far past the outermost connector the SVG surface reaches.
+ *
+ * This used to be a 100,000px half-extent, so the layer declared a 200,000 ×
+ * 200,000 pixel box — four orders of magnitude past any viewport — and mounted
+ * a SECOND identical one the moment a line was selected. The compositor was
+ * being handed a layer whose declared bounds bore no relation to what was
+ * drawn. The surface is now the union of the lines' own boxes plus this margin,
+ * which is enough for arrowheads, labels, the curve handle and its halo;
+ * `overflow: visible` still covers anything mid-drag that runs past it.
+ */
+const LINE_MARGIN = 64;
 
 const LINE_COLORS = ['#8a86a0', '#1d1d1f', '#f5f5f7', '#5e5ce6', '#1c7ed6', '#0ca678', '#f2a20d', '#e8590c', '#e64980'];
 const WEIGHTS = [1.5, 2.5, 4, 6];
@@ -34,17 +46,57 @@ export function highlightConnectTarget(ev: PointerEvent | null, excludeId?: stri
 interface Pt { x: number; y: number }
 interface EndInfo extends Pt { w: number; h: number; free: boolean }
 
+/** Everything a line needs drawn, once the trims and the bezier are solved. */
+interface LineGeo { p0: Pt; p1: Pt; cx: number; cy: number; hx: number; hy: number }
+
+/**
+ * An accumulated bounding box turned into an SVG surface, with the margin.
+ *
+ * A box that never grew (no line resolved) degenerates to a 1×1 at the origin
+ * rather than to Infinity — an `<svg width={Infinity}>` is a rendering fault,
+ * not an empty layer, and this path is reached whenever every connector points
+ * at something that has been deleted.
+ */
+function surfaceBox(minX: number, minY: number, maxX: number, maxY: number) {
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return { x: 0, y: 0, w: 1, h: 1 };
+  return {
+    x: minX - LINE_MARGIN,
+    y: minY - LINE_MARGIN,
+    w: Math.max(1, maxX - minX + LINE_MARGIN * 2),
+    h: Math.max(1, maxY - minY + LINE_MARGIN * 2),
+  };
+}
+
 type HandleDrag =
   | { lineId: string; kind: 'from' | 'to'; x: number; y: number }
   | { lineId: string; kind: 'curve'; value: number }
   | { lineId: string; kind: 'body'; dx: number; dy: number };
 
 export function LineLayer() {
-  const { boardId, elements, selection, select, commitTransaction } = useBoard();
+  // `tr` rather than `t`: this file already uses `t` as a bezier parameter.
+  const tr = useT();
+  // Field selectors, not the whole store: this layer subscribed wholesale, so a
+  // collaborator's cursor at 20 Hz recomputed every bezier on the board.
+  const boardId = useBoard((s) => s.boardId);
+  const elements = useBoard((s) => s.elements);
+  const selection = useBoard((s) => s.selection);
+  const select = useBoard((s) => s.select);
+  const commitTransaction = useBoard((s) => s.commitTransaction);
   const sizes = useView((s) => s.sizes);
   const drag = useView((s) => s.drag);
   const lineDraft = useView((s) => s.lineDraft);
   const [handleDrag, setHandleDrag] = useState<HandleDrag | null>(null);
+  /**
+   * Solved geometry from the previous pass, keyed by line id.
+   *
+   * `drag` gets a fresh identity on every pointermove, so this component
+   * re-rendered at pointer rate and recomputed every line — two trims (each a
+   * `Math.hypot` and two divisions) plus a bezier — for 200 lines while the
+   * card being dragged touched none of them. The signature below is exactly the
+   * inputs the solve reads, so a line whose endpoints did not move reuses its
+   * answer and the drag costs only the lines actually attached to what moved.
+   */
+  const geoCache = useRef(new Map<string, { sig: string; geo: LineGeo }>());
 
   const lines = useMemo(
     () =>
@@ -225,23 +277,52 @@ export function LineLayer() {
   // otherwise a handle sitting at a card's edge is unclickable (the card,
   // painted later, would swallow the pointer).
   const handleNodes: JSX.Element[] = [];
+  const handleBox = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+  // Solve one line, or hand back the answer from last frame if none of its
+  // inputs moved. Everything the solve reads goes in the signature.
+  const solve = (line: QElement, from: EndInfo, to: EndInfo, curve: number): LineGeo => {
+    const sig = `${from.x},${from.y},${from.w},${from.h},${from.free ? 1 : 0}`
+      + `|${to.x},${to.y},${to.w},${to.h},${to.free ? 1 : 0}|${curve}`;
+    const hit = geoCache.current.get(line.id);
+    if (hit && hit.sig === sig) return hit.geo;
+    const p0 = trim(from, to);
+    const p1 = trim(to, from);
+    const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+    const nx = -(p1.y - p0.y), ny = p1.x - p0.x;
+    const nl = Math.hypot(nx, ny) || 1;
+    const cx = mx + (nx / nl) * curve, cy = my + (ny / nl) * curve;
+    // The bezier's actual midpoint (t = 0.5) — where the handle sits.
+    const geo: LineGeo = {
+      p0, p1, cx, cy,
+      hx: 0.25 * p0.x + 0.5 * cx + 0.25 * p1.x,
+      hy: 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y,
+    };
+    geoCache.current.set(line.id, { sig, geo });
+    return geo;
+  };
+
+  // The union of what is actually drawn, so the surface below is sized to the
+  // diagram rather than to a made-up 200,000px square.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const grow = (x: number, y: number) => {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  };
 
   const rendered = lines.map((line) => {
     const from = resolveEnd(line, 'from');
     const to = resolveEnd(line, 'to');
     if (!from || !to) return null;
-    const p0 = trim(from, to);
-    const p1 = trim(to, from);
-    const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
     const curve = handleDrag?.lineId === line.id && handleDrag.kind === 'curve'
       ? handleDrag.value
       : line.content?.curve ?? 0;
-    const nx = -(p1.y - p0.y), ny = p1.x - p0.x;
-    const nl = Math.hypot(nx, ny) || 1;
-    const cx = mx + (nx / nl) * curve, cy = my + (ny / nl) * curve;
-    // The bezier's actual midpoint (t = 0.5) — where the handle sits.
-    const hx = 0.25 * p0.x + 0.5 * cx + 0.25 * p1.x;
-    const hy = 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y;
+    const { p0, p1, cx, cy, hx, hy } = solve(line, from, to, curve);
+    grow(p0.x, p0.y);
+    grow(p1.x, p1.y);
+    grow(cx, cy);
     const selectedLine = selection.has(line.id);
     const color = line.content?.color ?? '#8a86a0';
     const weight = line.content?.weight ?? 2;
@@ -263,7 +344,7 @@ export function LineLayer() {
           }}
           onDoubleClick={async (e) => {
             e.stopPropagation();
-            const label = await prompt({ title: 'Line label', defaultValue: line.content?.label ?? '', placeholder: 'Label this connection', confirmLabel: 'Set label' });
+            const label = await prompt({ title: translate('dlg.lineLabel'), defaultValue: line.content?.label ?? '', placeholder: translate('dlg.lineLabelHint'), confirmLabel: translate('dlg.setLabel') });
             if (label !== null) void commitTransaction([updateOp(line, { content: { label } })]);
           }}
         />
@@ -304,18 +385,61 @@ export function LineLayer() {
         </g>
       );
       handleNodes.push(handle('from', p0.x, p0.y), handle('to', p1.x, p1.y), handle('curve', hx, hy));
+      for (const [hxp, hyp] of [[p0.x, p0.y], [p1.x, p1.y], [hx, hy]]) {
+        if (hxp < handleBox.minX) handleBox.minX = hxp;
+        if (hyp < handleBox.minY) handleBox.minY = hyp;
+        if (hxp > handleBox.maxX) handleBox.maxX = hxp;
+        if (hyp > handleBox.maxY) handleBox.maxY = hyp;
+      }
     }
 
     return node;
   });
 
+  // The draft connector is drawn on the same surface, so its far end has to be
+  // inside the box or the ghost line vanishes the moment it leaves the diagram.
+  if (draftSource && lineDraft) {
+    const from = center(draftSource);
+    grow(from.x, from.y);
+    grow(lineDraft.x, lineDraft.y);
+  }
+
+  const box = surfaceBox(minX, minY, maxX, maxY);
+  const handles = surfaceBox(handleBox.minX, handleBox.minY, handleBox.maxX, handleBox.maxY);
+
   return (
     <>
+      {/* AX27. The connector graph rendered as bare `<path>` elements with no
+          accessible representation at all — so for a non-sighted reader a
+          workflow diagram was a set of unrelated cards, and the relationships
+          the diagram exists to state were simply absent. Lines carry a `label`
+          and endpoints; the linear form of that is one sentence per edge, which
+          is also exactly the shape `edgesAmong` was written to produce on the
+          agent side and which nothing has ever read. One structure, two
+          readers.
+
+          Outside the <svg>s on purpose: SVG child roles are inconsistently
+          exposed, and a plain list is a thing every screen reader can walk. */}
+      {lines.length > 0 && (
+        <ul className="sr-only" aria-label={tr('a11y.connections')}>
+          {lines.map((line) => {
+            const a = elements[line.content?.fromId]?.content;
+            const b = elements[line.content?.toId]?.content;
+            const nameOf = (c: any) => c?.title || c?.textPreview || c?.filename || tr('search.untitled');
+            if (!a && !b) return null;
+            return (
+              <li key={`edge-${line.id}`}>
+                {`${nameOf(a)} ${tr('a11y.connectsTo')} ${nameOf(b)}${line.content?.label ? `, ${line.content.label}` : ''}`}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <svg
-        style={{ position: 'absolute', left: -EXTENT, top: -EXTENT, overflow: 'visible', pointerEvents: 'none' }}
-        width={EXTENT * 2}
-        height={EXTENT * 2}
-        viewBox={`${-EXTENT} ${-EXTENT} ${EXTENT * 2} ${EXTENT * 2}`}
+        style={{ position: 'absolute', left: box.x, top: box.y, overflow: 'visible', pointerEvents: 'none' }}
+        width={box.w}
+        height={box.h}
+        viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
       >
         <defs>
           <marker id="qn-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -335,12 +459,16 @@ export function LineLayer() {
           );
         })()}
       </svg>
+      {/* A second surface, not a `<g>` in the first: handles sit at a card's
+          edge and have to paint ABOVE the shells, while the line body paints
+          below them. It is now sized to the handles themselves rather than
+          being a second 200,000px square laid over the whole canvas. */}
       {handleNodes.length > 0 && (
         <svg
-          style={{ position: 'absolute', left: -EXTENT, top: -EXTENT, overflow: 'visible', pointerEvents: 'none', zIndex: 25 }}
-          width={EXTENT * 2}
-          height={EXTENT * 2}
-          viewBox={`${-EXTENT} ${-EXTENT} ${EXTENT * 2} ${EXTENT * 2}`}
+          style={{ position: 'absolute', left: handles.x, top: handles.y, overflow: 'visible', pointerEvents: 'none', zIndex: 25 }}
+          width={handles.w}
+          height={handles.h}
+          viewBox={`${handles.x} ${handles.y} ${handles.w} ${handles.h}`}
         >
           {/* While a handle drag is in flight the whole overlay goes
               pointer-transparent — otherwise the traveling handle sits on
@@ -359,6 +487,7 @@ export function LineLayer() {
 // ---- floating line toolbar: Color · Start · End · Label · Dashed · Weight ----
 
 function LineToolbar({ line, x, y }: { line: QElement; x: number; y: number }) {
+  const t = useT();
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [colorsOpen, setColorsOpen] = useState(false);
   const c = line.content ?? {};
@@ -373,8 +502,8 @@ function LineToolbar({ line, x, y }: { line: QElement; x: number; y: number }) {
 
   return (
     <div className="line-toolbar" style={{ left: x + 18, top: y - 20 }} onPointerDown={(e) => e.stopPropagation()}>
-      <button title="Line color" onClick={() => setColorsOpen(!colorsOpen)}>
-        <span className="lt-ico"><ColorIcon size={15} /></span><span>Color</span>
+      <button title={t('line.color')} onClick={() => setColorsOpen(!colorsOpen)}>
+        <span className="lt-ico"><ColorIcon size={15} /></span><span>{t('line.color')}</span>
       </button>
       {colorsOpen && (
         <div className="lt-colors">
@@ -388,29 +517,29 @@ function LineToolbar({ line, x, y }: { line: QElement; x: number; y: number }) {
           ))}
         </div>
       )}
-      <button title="Arrow at start" className={c.startArrow ? 'on' : ''} onClick={() => set({ startArrow: !c.startArrow })}>
-        <span className="lt-ico"><LineStartIcon size={15} /></span><span>Start</span>
+      <button title={t('line.startHint')} className={c.startArrow ? 'on' : ''} onClick={() => set({ startArrow: !c.startArrow })}>
+        <span className="lt-ico"><LineStartIcon size={15} /></span><span>{t('line.start')}</span>
       </button>
-      <button title="Arrow at end" className={c.endArrow ? 'on' : ''} onClick={() => set({ endArrow: !c.endArrow })}>
-        <span className="lt-ico"><LineEndIcon size={15} /></span><span>End</span>
+      <button title={t('line.endHint')} className={c.endArrow ? 'on' : ''} onClick={() => set({ endArrow: !c.endArrow })}>
+        <span className="lt-ico"><LineEndIcon size={15} /></span><span>{t('line.end')}</span>
       </button>
       <button
-        title="Label"
+        title={t('line.label')}
         className={c.label ? 'on' : ''}
         onClick={() => {
           void (async () => {
-            const label = await prompt({ title: 'Line label', defaultValue: c.label ?? '', placeholder: 'Label this connection', confirmLabel: 'Set label' });
+            const label = await prompt({ title: t('dlg.lineLabel'), defaultValue: c.label ?? '', placeholder: t('dlg.lineLabelHint'), confirmLabel: t('dlg.setLabel') });
             if (label !== null) set({ label });
           })();
         }}
       >
-        <span className="lt-ico"><LabelIcon size={15} /></span><span>Label</span>
+        <span className="lt-ico"><LabelIcon size={15} /></span><span>{t('line.label')}</span>
       </button>
-      <button title="Dashed" className={c.dashed ? 'on' : ''} onClick={() => set({ dashed: !c.dashed })}>
-        <span className="lt-ico"><DashIcon size={15} /></span><span>Dashed</span>
+      <button title={t('line.dashed')} className={c.dashed ? 'on' : ''} onClick={() => set({ dashed: !c.dashed })}>
+        <span className="lt-ico"><DashIcon size={15} /></span><span>{t('line.dashed')}</span>
       </button>
-      <button title="Line weight" onClick={cycleWeight}>
-        <span className="lt-ico"><WeightIcon size={15} /></span><span>Weight</span>
+      <button title={t('line.weightHint')} onClick={cycleWeight}>
+        <span className="lt-ico"><WeightIcon size={15} /></span><span>{t('line.weight')}</span>
       </button>
     </div>
   );

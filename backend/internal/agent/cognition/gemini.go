@@ -38,14 +38,21 @@ const DefaultGeminiModel = "gemini-2.5-flash"
 const geminiBase = "https://generativelanguage.googleapis.com/v1beta"
 
 // NewGemini constructs the provider.
-func NewGemini(apiKey, model string) (*Gemini, error) {
+// callTimeout bounds one HTTP call; see cognition.Options.CallTimeout for why
+// the caller owns it rather than this constructor. It used to be a flat three
+// minutes, and resilient.go retries three times, so one hung call could burn
+// nine minutes against an eight-minute run deadline.
+func NewGemini(apiKey, model string, callTimeout time.Duration) (*Gemini, error) {
 	if apiKey == "" {
 		return nil, ErrNotConfigured
 	}
 	if model == "" {
 		model = DefaultGeminiModel
 	}
-	return &Gemini{apiKey: apiKey, model: model, http: &http.Client{Timeout: 3 * time.Minute}}, nil
+	if callTimeout <= 0 {
+		callTimeout = defaultCallTimeout
+	}
+	return &Gemini{apiKey: apiKey, model: model, http: &http.Client{Timeout: callTimeout}}, nil
 }
 
 // Name implements Provider.
@@ -147,9 +154,19 @@ func (g *Gemini) Complete(ctx context.Context, req Request) (*Response, error) {
 		})
 	}
 
-	body := geminiRequest{
-		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: req.System}}},
-		Contents:          geminiContents(req.Messages),
+	body := geminiRequest{Contents: geminiContents(req.Messages)}
+	// Only when there IS one. An empty system prompt was still sent as a
+	// system_instruction carrying one empty part, and Gemini rejects that
+	// outright: "parts[0].data: required oneof field 'data' must have one
+	// initialized field", a 400 before the model is ever reached.
+	//
+	// Every real run sets a system prompt, so this hid until something asked a
+	// question without one — the provider health probe, whose entire job is to
+	// find out whether the provider will talk to us. It reported the provider
+	// dead while the provider was fine, and the composer told the person "Qomra
+	// is unavailable" on a working deployment.
+	if strings.TrimSpace(req.System) != "" {
+		body.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: req.System}}}
 	}
 	body.GenerationConfig = &struct {
 		MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
@@ -273,14 +290,19 @@ func (g *Gemini) call(ctx context.Context, model string, body geminiRequest) (*g
 	// proxy and access logs.
 	httpReq.Header.Set("x-goog-api-key", g.apiKey)
 
+	// %w on BOTH halves. Wrapping the transport error with %v flattened it to a
+	// string, so errors.Is(err, context.DeadlineExceeded) was false for a call
+	// that had timed out — and the harness reported a hung provider as the run
+	// exhausting its budget, which sends somebody to raise a limit they never
+	// approached.
 	res, err := g.http.Do(httpReq)
 	if err != nil {
-		return nil, Usage{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, Usage{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))
 	if err != nil {
-		return nil, Usage{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, Usage{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
 	var parsed geminiResponse
@@ -291,6 +313,9 @@ func (g *Gemini) call(ctx context.Context, model string, body geminiRequest) (*g
 		InputTokens:  parsed.UsageMetadata.PromptTokenCount,
 		OutputTokens: parsed.UsageMetadata.CandidatesTokenCount,
 		CachedTokens: parsed.UsageMetadata.CachedContentTokenCount,
+		// The call is counted where the call is made — see the same line in
+		// anthropic.go and Usage.Add for why it cannot live in the accumulator.
+		Calls: 1,
 	}
 	if cost, ok := CostUSD(model, usage); ok {
 		usage.CostUSD = cost

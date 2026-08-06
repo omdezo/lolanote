@@ -6,12 +6,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QComment, QElement } from '../../api/types';
 import { api } from '../../api/client';
 import { currentSub } from '../../auth/keycloak';
+import { useT } from '../../i18n';
+import { activateElement } from '../../canvas/activate';
 import { dirAttr, elementDir } from '../../lib/direction';
 import { iconByName, isLetterIcon } from '../../lib/iconCatalog';
 import { updateOp, useBoard } from '../../store/boardStore';
 import { useUserNames } from '../../store/userNames';
 import type { ElementViewProps } from './ElementView';
 import { AliasArrow, AudioIcon, BoardGlyph, CommentIcon, FileIcon, SyncIcon, VideoIcon } from '../Icons';
+import { AuthedImage } from './AuthedImage';
 
 // ---- BOARD / ALIAS: gradient tile + title + content stats (§3.2, §4.16) ----
 
@@ -43,10 +46,15 @@ export function statLineFor(stats: Record<string, number> | undefined): string {
 }
 
 export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
-  const { elements, boardStats, commitTransaction } = useBoard();
+  // Selectors, not the store. A board tile subscribed wholesale re-rendered on
+  // every collaborator cursor frame; the only thing it reads out of `elements`
+  // is the ONE board an alias points at.
   const isAlias = element.type === 'ALIAS';
-  const target = isAlias ? elements[element.content?.targetBoardId] : element;
-  const title = (isAlias ? element.content?.title || target?.content?.title : element.content?.title) ?? 'Untitled board';
+  const target = useBoard((s) => (isAlias ? s.elements[element.content?.targetBoardId] : element));
+  const boardStats = useBoard((s) => s.boardStats);
+  const commitTransaction = useBoard((s) => s.commitTransaction);
+  const t = useT();
+  const title = (isAlias ? element.content?.title || target?.content?.title : element.content?.title) ?? t('board.untitled');
   const [editTitle, setEditTitle] = useState<string | null>(null);
   const statsId = isAlias ? element.content?.targetBoardId : element.id;
   const stats = boardStats[statsId];
@@ -59,17 +67,17 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   const tileImg = (styleSource.iconUrl as string) || '';
   const LucideGlyph = tileIcon ? iconByName(tileIcon) : undefined;
   const tileGlyph = tileImg
-    ? <img className="tile-img" src={tileImg} alt="" draggable={false} />
+    ? <AuthedImage className="tile-img" src={tileImg} alt="" draggable={false} />
     : LucideGlyph
       ? <LucideGlyph className="tile-glyph" strokeWidth={2.1} />
       : tileIcon
         ? <span className={`tile-icon${isLetterIcon(tileIcon) ? ' tile-letter' : ''}`}>{tileIcon}</span>
         : null;
 
-  const open = () => {
-    const id = isAlias ? element.content?.targetBoardId : element.id;
-    if (id) void navigate(id);
-  };
+  // Through the shared verb rather than its own copy, so the double-click, the
+  // keyboard's Enter and the second tap on a selected tile all do the same
+  // thing — the drift between them is what made OPEN a mouse-only idea.
+  const open = () => { activateElement(element, navigate); };
 
   const commitTitle = () => {
     if (editTitle && editTitle.trim() && editTitle !== title) {
@@ -97,10 +105,10 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   // matching Milanote's board rows in columns.
   if (inColumn) {
     return (
-      <div className="board-row" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
+      <div className="board-row" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title={t('a11y.openHint')}>
         <div className="tile row-tile" style={{ background: tileBg }}>
           {tileGlyph ?? <BoardGlyph size={22} />}
-          {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={11} /></div>}
+          {isAlias && <div className="alias-badge" title={t('a11y.shortcutBadge')}><AliasArrow size={11} /></div>}
         </div>
         <div className="board-row-text">
           {titleNode}
@@ -111,10 +119,10 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
   }
 
   return (
-    <div className="board-card" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title="Double-click to open">
+    <div className="board-card" onDoubleClick={(e) => { e.stopPropagation(); open(); }} title={t('a11y.openHint')}>
       <div className="tile" style={{ background: tileBg }}>
         {tileGlyph ?? <BoardGlyph size={30} />}
-        {isAlias && <div className="alias-badge" title="Shortcut to a board"><AliasArrow size={12} /></div>}
+        {isAlias && <div className="alias-badge" title={t('a11y.shortcutBadge')}><AliasArrow size={12} /></div>}
       </div>
       {titleNode}
       {statLine && <div className="board-stats">{statLine}</div>}
@@ -125,6 +133,7 @@ export function BoardCard({ element, navigate, inColumn }: ElementViewProps) {
 // ---- LINK (§4.4–4.7): preview card or live embed ----
 
 export function LinkCard({ element }: { element: QElement }) {
+  const t = useT();
   const c = element.content ?? {};
   const host = (() => { try { return new URL(c.url).host; } catch { return c.url; } })();
   const embed = embedSrc(c.url, c.embedType);
@@ -155,7 +164,7 @@ export function LinkCard({ element }: { element: QElement }) {
   }
 
   return (
-    <div className="link-card" onDoubleClick={() => window.open(c.url, '_blank', 'noopener')} title="Double-click to open">
+    <div className="link-card" onDoubleClick={() => activateElement(element)} title={t('a11y.openHint')}>
       {c.showPreview !== false && c.thumbnailUrl && <img className="link-thumb" src={c.thumbnailUrl} alt="" />}
       <div className="link-body">
         <div className="link-title">{c.title || c.url}</div>
@@ -206,16 +215,29 @@ function embedSrc(url: string, kind?: string): string | null {
 // ---- IMAGE (§4.3) ----
 
 export function ImageCard({ element }: { element: QElement }) {
+  const t = useT();
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [caption, setCaption] = useState<string | null>(null);
   const c = element.content ?? {};
   return (
     <div className="image-card">
-      <img src={c.url} alt={c.caption ?? ''} draggable={false} />
+      {/* AX27. This was `alt={c.caption ?? ''}`, immediately followed by the
+          caption <input> whose VALUE is the same string — so a captioned image
+          announced its caption twice, once as the image and once as the field.
+          And an uncaptioned image announced as `alt=""`, which is a positive
+          assertion to assistive technology that the image carries nothing. On a
+          filmmaker's reference board the images ARE the content: forty
+          uncaptioned stills was the board being empty.
+          With a caption the field speaks and the image stays quiet; without
+          one the image says that it is an image nobody has described, which is
+          true, useful, and the thing IN15's uncaptioned-image digest flag is
+          counting from the other side. */}
+      <AuthedImage src={c.url} alt={c.caption ? '' : t('image.undescribed')} draggable={false} />
       <input
         className="image-caption"
         dir={dirAttr(elementDir(element))}
-        placeholder="Add a caption"
+        aria-label={t('image.caption')}
+        placeholder={t('image.caption')}
         value={caption ?? c.caption ?? ''}
         onChange={(e) => setCaption(e.target.value)}
         onPointerDown={(e) => e.stopPropagation()}
@@ -233,6 +255,7 @@ export function ImageCard({ element }: { element: QElement }) {
 // ---- FILE (§4.8) — with inline players for uploaded audio/video ----
 
 export function FileCard({ element }: { element: QElement }) {
+  const t = useT();
   const c = element.content ?? {};
   const mime: string = c.mimeType ?? '';
 
@@ -257,7 +280,7 @@ export function FileCard({ element }: { element: QElement }) {
     );
   }
   return (
-    <div className="file-card" onDoubleClick={() => window.open(c.url, '_blank', 'noopener')} title="Double-click to download">
+    <div className="file-card" onDoubleClick={() => activateElement(element)} title={`${t('a11y.download')} — ${t('a11y.openHint')}`}>
       <div className="file-badge"><FileIcon size={19} /></div>
       <div style={{ minWidth: 0 }}>
         <div className="file-name">{c.filename}</div>
@@ -278,6 +301,7 @@ function formatBytes(n: number): string {
 
 export function SwatchCard({ element }: { element: QElement }) {
   const commitTransaction = useBoard((s) => s.commitTransaction);
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
   const c = element.content ?? {};
   const hex: string = c.hex ?? '#5e5ce6';
@@ -300,17 +324,18 @@ export function SwatchCard({ element }: { element: QElement }) {
 
   return (
     <div className="swatch-card">
-      <div className="swatch-color" style={{ background: hex }} onDoubleClick={() => inputRef.current?.click()} title="Double-click to pick a color" />
+      <div className="swatch-color" style={{ background: hex }} onDoubleClick={() => inputRef.current?.click()} title={`${t('a11y.pickColour')} — ${t('a11y.openHint')}`} />
       <input
         ref={inputRef}
         type="color"
+        aria-label={t('a11y.pickColour')}
         value={hex}
         style={{ position: 'absolute', width: 0, height: 0, opacity: 0 }}
         onChange={(e) => void commitTransaction([updateOp(element, { content: { hex: e.target.value } })])}
       />
       <div className="swatch-value">
         <span>{display()}</span>
-        <button onPointerDown={(e) => e.stopPropagation()} onClick={cycleFormat} title="Cycle HEX / RGB / HSL"><SyncIcon size={13} /></button>
+        <button onPointerDown={(e) => e.stopPropagation()} onClick={cycleFormat} title={t('a11y.cycleFormat')} aria-label={t('a11y.cycleFormat')}><SyncIcon size={13} /></button>
       </div>
     </div>
   );
@@ -335,6 +360,7 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 interface Stroke { points: number[][]; color: string; width: number }
 
 export function SketchCard({ element }: { element: QElement }) {
+  const t = useT();
   const commitTransaction = useBoard((s) => s.commitTransaction);
   const [drawing, setDrawing] = useState<Stroke | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -352,8 +378,15 @@ export function SketchCard({ element }: { element: QElement }) {
 
   return (
     <div className="sketch-card">
+      {/* A bare <svg> with no role and no title announced as nothing at all,
+          which is the same fact the digest found from the other side: a sketch
+          carries no title, no textPreview, no filename and no url, so it was an
+          element that exists, can be moved, and has no name. Naming it by its
+          stroke count is the minimum that makes it referenceable. */}
       <svg
         ref={svgRef}
+        role="img"
+        aria-label={`${t('tool.sketch')} — ${strokes.length}`}
         viewBox={`0 0 ${w} ${h}`}
         style={{ width: '100%', height: 'auto', cursor: 'crosshair', touchAction: 'none' }}
         onPointerDown={(e) => {
@@ -393,12 +426,16 @@ export function SketchCard({ element }: { element: QElement }) {
 // a notification.
 
 export function CommentCard({ element }: { element: QElement }) {
+  const t = useT();
   const [comments, setComments] = useState<QComment[]>([]);
   const [body, setBody] = useState('');
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentions, setMentions] = useState<Record<string, string>>({}); // name → sub
   const users = useUserNames((s) => s.users);
-  const { elements, boardId } = useBoard();
+  // Only the board's own ACL, not the element map: a comment thread that
+  // subscribed to `elements` re-rendered its whole editor on every remote
+  // cursor frame, losing nothing but costing everything.
+  const boardAcl = useBoard((s) => s.elements[s.boardId]?.acl);
 
   useEffect(() => {
     api.comments(element.id).then(setComments).catch(() => setComments([]));
@@ -422,11 +459,10 @@ export function CommentCard({ element }: { element: QElement }) {
   }, [comments]);
 
   // Collaborators on this board = mention candidates.
-  const collaborators = useMemo(() => {
-    const acl = elements[boardId]?.acl;
-    const subs = [acl?.ownerId, ...(acl?.editors ?? [])].filter(Boolean) as string[];
-    return subs;
-  }, [elements, boardId]);
+  const collaborators = useMemo(
+    () => [boardAcl?.ownerId, ...(boardAcl?.editors ?? [])].filter(Boolean) as string[],
+    [boardAcl],
+  );
   useEffect(() => {
     if (collaborators.length) void useUserNames.getState().resolve(collaborators);
   }, [collaborators]);
@@ -467,7 +503,7 @@ export function CommentCard({ element }: { element: QElement }) {
 
   return (
     <div className="comment-card">
-      <div className="thread-title"><CommentIcon size={13} /> COMMENTS</div>
+      <div className="thread-title"><CommentIcon size={13} /> {t('comment.head')}</div>
       {comments.map((c) => (
         <div key={c.id} className="comment-msg" dir={dir}>
           <div className="author">{c.authorId === currentSub() ? 'You' : (users[c.authorId]?.name ?? c.authorId.slice(0, 8))}</div>
@@ -486,7 +522,8 @@ export function CommentCard({ element }: { element: QElement }) {
         <input
           className="comment-input"
           dir={dir}
-          placeholder="Reply… @ to mention"
+          aria-label={t('comment.reply')}
+          placeholder={t('comment.reply')}
           value={body}
           onChange={(e) => onBodyChange(e.target.value)}
           onPointerDown={(e) => e.stopPropagation()}

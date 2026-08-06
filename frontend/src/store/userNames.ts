@@ -16,7 +16,7 @@ interface UserNamesState {
   resolve(subs: string[]): Promise<void>;
 }
 
-let inFlight: Set<string> = new Set();
+const inFlight: Set<string> = new Set();
 
 export const useUserNames = create<UserNamesState>((set, get) => ({
   users: {},

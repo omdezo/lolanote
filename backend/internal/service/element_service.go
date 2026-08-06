@@ -11,9 +11,10 @@ import (
 // more than a merge patch: duplication (deep copies), synced-note conversion
 // (§4.15), and the Trash lifecycle (§3.4).
 type ElementService struct {
-	elements domain.ElementRepository
-	access   *AccessResolver
-	newID    IDGenerator
+	elements  domain.ElementRepository
+	access    *AccessResolver
+	newID     IDGenerator
+	collector *Collector // optional: the non-element half of a permanent delete
 }
 
 // NewElementService constructs the service.
@@ -21,16 +22,25 @@ func NewElementService(elements domain.ElementRepository, access *AccessResolver
 	return &ElementService{elements: elements, access: access, newID: newID}
 }
 
+// AttachCollector lets "Delete forever" reach the uploaded bytes and the
+// journal's verbatim copy of what it deleted.
+//
+// Optional so a minimal wiring still compiles, but a deployment without it has
+// a delete gesture that stops at the element row — see Collector for what
+// survives.
+func (s *ElementService) AttachCollector(c *Collector) { s.collector = c }
+
 // Get returns one element after a view check.
 func (s *ElementService) Get(ctx context.Context, p *domain.Principal, id string) (*domain.Element, error) {
 	el, err := s.elements.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := s.access.RequireView(ctx, id, p); err != nil {
+	role, _, err := s.access.RequireView(ctx, id, p)
+	if err != nil {
 		return nil, err
 	}
-	return el, nil
+	return redact(el, role), nil
 }
 
 // Duplicate deep-copies an element; containers (boards, columns, task lists)
@@ -52,7 +62,9 @@ func (s *ElementService) Duplicate(ctx context.Context, p *domain.Principal, id 
 
 	subtree := []*domain.Element{src}
 	if src.Type.IsContainer() {
-		descendants, err := s.elements.Descendants(ctx, src.ID, false)
+		// Bounded, and REFUSING rather than truncating: a duplicate missing
+		// cards nobody can name is worse than a duplicate that did not happen.
+		descendants, err := subtreeOf(ctx, s.elements, src.ID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -197,6 +209,19 @@ func (s *ElementService) ConvertToClone(ctx context.Context, p *domain.Principal
 
 // CloneInstances lists where a synced note's siblings live — the footer each
 // copy renders (§4.15). Returns the instances plus their parent board titles.
+//
+// Every instance is authorised on its OWN merits, and that is the point. View
+// rights on the SOURCE were the only check, and the answer this returns is a list
+// of OTHER people's boards: a collaborator who clones your card onto their
+// private board puts that board's id and its title into your reply, and the
+// reverse leaks yours to them. The read path already learned this lesson once, in
+// BoardService.Children, where resolving a clone's source unchecked was a
+// cross-tenant disclosure; this is the same relationship read from the other end
+// and it kept the bug.
+//
+// Instances the caller cannot view are DROPPED rather than erroring: a copy on a
+// board you were never shown is a normal state, not a failed request. The count
+// therefore tells the truth about what you can see, not about what exists.
 func (s *ElementService) CloneInstances(ctx context.Context, p *domain.Principal, sourceID string) ([]map[string]any, error) {
 	if _, _, err := s.access.RequireView(ctx, sourceID, p); err != nil {
 		return nil, err
@@ -207,6 +232,9 @@ func (s *ElementService) CloneInstances(ctx context.Context, p *domain.Principal
 	}
 	out := make([]map[string]any, 0, len(clones))
 	for _, c := range clones {
+		if _, _, err := s.access.RequireView(ctx, c.ID, p); err != nil {
+			continue
+		}
 		entry := map[string]any{"id": c.ID, "parentId": c.Location.ParentID}
 		if parent, err := s.elements.Get(ctx, c.Location.ParentID); err == nil {
 			entry["boardTitle"] = parent.Title()
@@ -223,6 +251,21 @@ func (s *ElementService) CloneInstances(ctx context.Context, p *domain.Principal
 type TrashItem struct {
 	Element     *domain.Element `json:"element"`
 	DeletedByMe bool            `json:"deletedByMe"`
+	// PurgeAt is the moment this stops being recoverable — DL17's hard clause.
+	//
+	// The UI used to compute this itself, from a hard-coded "3 months" that sat
+	// in the trash panel's EMPTY state, so the one sentence stating the window
+	// rendered only when there was nothing left to lose. Retention here is 90
+	// days, not three months; those differ by up to a day at the boundary, and a
+	// day is long enough for someone to believe a deleted sequence is still
+	// coming back when it is already gone. Serving the deadline means a change
+	// to domain.TrashRetention moves every countdown in the product at once,
+	// instead of silently making all of them wrong.
+	//
+	// Omitted rather than zero-valued when the row somehow has no DeletedAt: the
+	// client renders nothing for a missing deadline, which is honest, where a
+	// zero time renders as "expired" for something that is not.
+	PurgeAt *time.Time `json:"purgeAt,omitempty"`
 }
 
 // Trash lists the caller's trash.
@@ -233,9 +276,49 @@ func (s *ElementService) Trash(ctx context.Context, p *domain.Principal) ([]Tras
 	}
 	out := make([]TrashItem, 0, len(items))
 	for _, el := range items {
-		out = append(out, TrashItem{Element: el, DeletedByMe: el.DeletedBy == p.Sub})
+		// A trashed sub-board is still an Element with an ACL on it, and the
+		// trash view is one more place that shipped it whole.
+		item := TrashItem{Element: redact(el, RoleView), DeletedByMe: el.DeletedBy == p.Sub}
+		if el.DeletedAt != nil {
+			purge := el.DeletedAt.Add(domain.TrashRetention)
+			item.PurgeAt = &purge
+		}
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+// mayActOnTrash answers who may restore or destroy a trashed element.
+//
+// Authorship was the WHOLE test — "you deleted it, or you made it" — and
+// authorship is a fact about the past that no revocation can take back. The trash
+// query is `deletedBy = me OR createdBy = me` across the entire database, so
+// every element you ever created on somebody else's board stays in your trash
+// list after they remove you from it. From there, DELETE /trash/:id destroyed the
+// element AND, when it is a container, its whole live subtree — a column you made
+// as a guest, later filled with fifty of the owner's cards, hard-deleted along
+// with their attachments and the journal's copy of them, by someone who at that
+// point cannot open the board at all.
+//
+// The two conditions are both necessary. Authorship alone is a claim about who
+// made something; the ACL is the claim about who may act on it now. Everything on
+// this path is irreversible or structural, so it needs both — the ordinary case
+// (your own board, your own card) satisfies them without noticing.
+//
+// Fails CLOSED when the chain cannot be resolved: an element whose ancestors are
+// gone is exactly the case where nobody can prove they are allowed.
+func (s *ElementService) mayActOnTrash(ctx context.Context, p *domain.Principal, el *domain.Element) error {
+	if el.DeletedBy != p.Sub && el.CreatedBy != p.Sub {
+		return domain.ErrForbidden
+	}
+	role, _, err := s.access.Resolve(ctx, el.ID, p)
+	if err != nil {
+		return domain.ErrForbidden
+	}
+	if !role.CanEdit() {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 // RestoreFromTrash brings one element back.
@@ -247,8 +330,8 @@ func (s *ElementService) RestoreFromTrash(ctx context.Context, p *domain.Princip
 	if !el.IsDeleted() {
 		return domain.ErrValidation
 	}
-	if el.DeletedBy != p.Sub && el.CreatedBy != p.Sub {
-		return domain.ErrForbidden
+	if err := s.mayActOnTrash(ctx, p, el); err != nil {
+		return err
 	}
 	// Restore the whole delete batch so a trashed board comes back with its
 	// contents (§3.4).
@@ -267,9 +350,20 @@ func (s *ElementService) DeletePermanently(ctx context.Context, p *domain.Princi
 	if !el.IsDeleted() {
 		return domain.ErrValidation
 	}
-	if el.DeletedBy != p.Sub && el.CreatedBy != p.Sub {
-		return domain.ErrForbidden
+	if err := s.mayActOnTrash(ctx, p, el); err != nil {
+		return err
 	}
+	// Everything the delete is about to destroy the only record of, read FIRST.
+	// A trashed element names its blob in content.attachmentId and that link dies
+	// with the row, so it has to be taken before the delete rather than looked
+	// for afterwards.
+	//
+	// This gesture never went near the sweeper: it hard-deletes on the spot, so
+	// the purged rows never appear in ExpiringSoon and the only garbage collector
+	// in the product never learned they existed. Every "Delete forever" left the
+	// actual bytes in the bucket, still fetchable, and the journal's verbatim
+	// copy of the content readable through board history.
+	doomed := []*domain.Element{el}
 	ids := []string{id}
 	if el.Type.IsContainer() {
 		descendants, err := s.elements.Descendants(ctx, id, true)
@@ -278,9 +372,17 @@ func (s *ElementService) DeletePermanently(ctx context.Context, p *domain.Princi
 		}
 		for _, d := range descendants {
 			ids = append(ids, d.ID)
+			doomed = append(doomed, d)
 		}
 	}
-	return s.elements.HardDelete(ctx, ids)
+	attachments := AttachmentRefsOf(doomed)
+	if err := s.elements.HardDelete(ctx, ids); err != nil {
+		return err
+	}
+	if s.collector != nil {
+		s.collector.Collect(ctx, ids, attachments)
+	}
+	return nil
 }
 
 // EmptyTrash permanently deletes everything in the caller's trash.

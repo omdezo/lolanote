@@ -3,23 +3,43 @@
 // Document, Audio, Map, Video, Heading), Add image, Upload, Draw, and the
 // Trash drop-target pinned at the bottom.
 import { useEffect, useRef, useState } from 'react';
-import gsap from 'gsap';
 import { api, uploadFile } from '../api/client';
 import { t } from '../i18n';
 import { createOp, useBoard } from '../store/boardStore';
 import { useSettings } from '../store/settingsStore';
+import { isRTL } from '../store/settingsStore';
+import { tweenFromTo } from '../lib/motion';
 import { useView } from '../store/viewStore';
 import { prompt } from './ui/Prompt';
 import {
   AudioIcon, BoardIcon, ColorIcon, ColumnIcon, CommentIcon, DocumentIcon,
-  DrawIcon, HeadingIcon, ImageIcon, LineIcon, LinkIcon, MapIcon, MoreIcon,
+  DrawIcon, HeadingIcon, ImageIcon, LineIcon, LinkIcon, MapIcon, MarqueeIcon, MoreIcon,
   NoteIcon, SketchIcon, SparkleIcon, TableIcon, TodoIcon, TrashIcon, UploadIcon, VideoIcon,
 } from './Icons';
 import { useAgent } from '../agent/agentStore';
 
+/**
+ * Whether this device has no hover and a coarse pointer.
+ *
+ * Read once at module scope rather than through a media-query subscription: a
+ * device does not become a mouse mid-session, and the alternative is a listener
+ * on every rail render.
+ */
+function coarsePointer(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+}
+
 export function Toolbar() {
   const { boardId, commitTransaction } = useBoard();
   const { drawMode, setDrawMode } = useView();
+  // MO2 — on a coarse pointer, one-finger drag pans, so rubber-band select
+  // needs somewhere to live. It lives here, beside Draw, and only on the
+  // devices where the gesture was taken away from it. Desktop is untouched.
+  const marqueeMode = useView((s) => s.marqueeMode);
+  const setMarqueeMode = useView((s) => s.setMarqueeMode);
+  const touch = coarsePointer();
   // Settings → Toolbar options decides which tools render; subscribing to
   // the settings slice also keeps the t() labels live on language change.
   const hiddenTools = useSettings((s) => s.settings.toolbar.hiddenTools);
@@ -35,7 +55,10 @@ export function Toolbar() {
 
   useEffect(() => {
     if (moreOpen && flyoutRef.current) {
-      gsap.fromTo(flyoutRef.current, { opacity: 0, x: -8, scale: 0.97 }, { opacity: 1, x: 0, scale: 1, duration: 0.18, ease: 'power3.out' });
+      // AX28: -8 is a physical pixel offset. The flyout opens off the rail,
+      // which is docked to the inline START, so under RTL it must come from
+      // the right or it slides out of the panel it belongs to.
+      tweenFromTo(flyoutRef.current, { opacity: 0, x: isRTL() ? 8 : -8, scale: 0.97 }, { opacity: 1, x: 0, scale: 1, duration: 0.18, ease: 'power3.out' });
     }
   }, [moreOpen]);
 
@@ -70,7 +93,7 @@ export function Toolbar() {
   };
 
   const addLink = async () => {
-    const url = await prompt({ title: 'Add a link', placeholder: 'https://…', confirmLabel: 'Add link' });
+    const url = await prompt({ title: t('dlg.addLink'), placeholder: t('dlg.linkUrl'), confirmLabel: t('dlg.addLinkGo') });
     if (!url || !/^https?:\/\//.test(url.trim())) return;
     const meta = await api.resolveLink(url.trim()).catch(() => null);
     add('LINK', meta
@@ -79,7 +102,7 @@ export function Toolbar() {
   };
 
   const addAudio = async () => {
-    const url = await prompt({ title: 'Add audio', placeholder: 'Spotify, SoundCloud, YouTube…', confirmLabel: 'Add' });
+    const url = await prompt({ title: t('dlg.addAudio'), placeholder: t('dlg.addAudioHint'), confirmLabel: t('dlg.add') });
     if (!url || !/^https?:\/\//.test(url.trim())) return;
     const meta = await api.resolveLink(url.trim()).catch(() => null);
     add('LINK', {
@@ -92,13 +115,13 @@ export function Toolbar() {
   };
 
   const addMap = async () => {
-    const q = await prompt({ title: 'Add a map', placeholder: 'Google Maps link, or a place / address', confirmLabel: 'Add map' });
+    const q = await prompt({ title: t('dlg.addMap'), placeholder: t('dlg.addMapHint'), confirmLabel: t('dlg.addMapGo') });
     if (!q?.trim()) return;
     add('LINK', { url: q.trim(), title: q.trim(), embedType: 'googlemaps', showPreview: true, showDescription: false }, 300);
   };
 
   const addVideo = async () => {
-    const url = await prompt({ title: 'Add a video', placeholder: 'YouTube or Vimeo link', confirmLabel: 'Add video' });
+    const url = await prompt({ title: t('dlg.addVideo'), placeholder: t('dlg.addVideoHint'), confirmLabel: t('dlg.addVideoGo') });
     if (!url || !/^https?:\/\//.test(url.trim())) return;
     const meta = await api.resolveLink(url.trim()).catch(() => null);
     add('LINK', {
@@ -109,7 +132,7 @@ export function Toolbar() {
     }, 320);
   };
 
-  const onFiles = async (files: FileList | null, imagesOnly: boolean) => {
+  const onFiles = async (files: FileList | null, _imagesOnly: boolean) => {
     if (!files) return;
     const pt = dropPoint();
     let offset = 0;
@@ -173,7 +196,10 @@ export function Toolbar() {
   ].filter((tool) => !hidden.has(tool.id));
 
   return (
-    <div className="rail" onPointerDown={(e) => e.stopPropagation()}>
+    // AX18. A landmark, so "what can I add to this board" is a place a screen
+    // reader user can jump to rather than a run of unlabelled buttons found by
+    // tabbing past the whole topbar.
+    <nav className="rail" aria-label={t('a11y.toolRail')} onPointerDown={(e) => e.stopPropagation()}>
       {mainTools.map((tool) => (
         <button key={tool.id} className="rail-btn" onClick={tool.onClick}>
           {tool.icon}
@@ -208,9 +234,20 @@ export function Toolbar() {
         </button>
       )}
       {!hidden.has('draw') && (
-        <button className={`rail-btn${drawMode ? ' active' : ''}`} onClick={() => setDrawMode(!drawMode)}>
+        <button className={`rail-btn${drawMode ? ' active' : ''}`} aria-pressed={drawMode} onClick={() => setDrawMode(!drawMode)}>
           <DrawIcon />
           <span>{t('tool.draw')}</span>
+        </button>
+      )}
+      {touch && (
+        <button
+          className={`rail-btn${marqueeMode ? ' active' : ''}`}
+          aria-pressed={marqueeMode}
+          title={t('tool.selectHint')}
+          onClick={() => setMarqueeMode(!marqueeMode)}
+        >
+          <MarqueeIcon />
+          <span>{t('tool.select')}</span>
         </button>
       )}
 
@@ -218,10 +255,10 @@ export function Toolbar() {
         <button
           className={`rail-btn agent${dockOpen ? ' active' : ''}`}
           onClick={() => useAgent.getState().setOpen(!dockOpen)}
-          title="Ask Qomra to do something on this board"
+          title={t('tool.agentHint')}
         >
           <SparkleIcon />
-          <span>Ask Qomra</span>
+          <span>{t('tool.agent')}</span>
         </button>
       )}
 
@@ -246,7 +283,7 @@ export function Toolbar() {
 
       <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => void onFiles(e.target.files, true)} />
       <input ref={anyFileInput} type="file" multiple hidden onChange={(e) => void onFiles(e.target.files, false)} />
-    </div>
+    </nav>
   );
 }
 

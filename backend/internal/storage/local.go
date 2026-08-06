@@ -35,6 +35,13 @@ func (p *LocalPresigner) PresignPut(_ context.Context, key, _ string, _ int64) (
 	return upload, upload, nil
 }
 
+// PresignGet answers the attachment indirection route. The local driver has no
+// signatures and no expiry, so the "fresh" URL is the same one — the contract is
+// what matters: callers ask per request, and the ACL check happens above.
+func (p *LocalPresigner) PresignGet(_ context.Context, key string) (string, error) {
+	return p.apiBase + "/api/v1/blob/" + key, nil
+}
+
 // Path maps a storage key to its on-disk location, refusing traversal.
 func (p *LocalPresigner) Path(key string) (string, error) {
 	clean := filepath.Clean(key)

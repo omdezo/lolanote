@@ -22,8 +22,74 @@ func NewTransactionRepo(s *Store) *TransactionRepo {
 
 var _ domain.TransactionRepository = (*TransactionRepo)(nil)
 
+// Insert writes the journal row, mapping a duplicate id to ErrConflict.
+//
+// It returned the raw driver error, so a retried commit — a network blip, a
+// double-click that beats the state transition, a scheduled run with no human
+// to not-double-click — surfaced as an opaque failure that no caller could tell
+// apart from a real one. ElementRepo.Insert has mapped this since it was
+// written; the journal simply never did, and the journal is the one row that
+// says a transaction happened.
 func (r *TransactionRepo) Insert(ctx context.Context, t *domain.Transaction) error {
 	_, err := r.col.InsertOne(ctx, t)
+	if mongo.IsDuplicateKeyError(err) {
+		return domain.ErrConflict
+	}
+	return err
+}
+
+// RedactElements strips the content of ops naming permanently-deleted elements.
+//
+// The row stays and the verb stays — "Ali deleted a card" is the audit trail and
+// the reason the journal exists. What goes is the verbatim copy of what the card
+// said, which is what made Empty Trash untrue: GET /boards/:id/transactions
+// serves this collection to any current editor, including one invited after the
+// deletion, and a delete op carries the deleted element's whole prior content.
+//
+// arrayFilters so only the matching ops in a mixed transaction are touched: a
+// drag of forty cards where one was later purged must keep the other
+// thirty-nine's inverses, or undo stops working for changes nobody deleted.
+func (r *TransactionRepo) RedactElements(ctx context.Context, elementIDs []string) (int64, error) {
+	if len(elementIDs) == 0 {
+		return 0, nil
+	}
+	res, err := r.col.UpdateMany(ctx,
+		bson.M{"ops.elementId": bson.M{"$in": elementIDs}},
+		bson.A{bson.M{"$set": bson.M{"ops": bson.M{"$map": bson.M{
+			"input": "$ops",
+			"as":    "op",
+			"in": bson.M{"$cond": bson.A{
+				bson.M{"$in": bson.A{"$$op.elementId", elementIDs}},
+				bson.M{"elementId": "$$op.elementId", "action": "$$op.action", "redacted": true},
+				"$$op",
+			}},
+		}}}}},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
+}
+
+// Complete settles a claimed row: the ops it applied, the notifications it rang,
+// and the state that turns a claim into a commit. See service.TransactionReserver
+// for why the id is claimed before the work rather than after it.
+func (r *TransactionRepo) Complete(ctx context.Context, txn *domain.Transaction) error {
+	res, err := r.col.UpdateOne(ctx, bson.M{"_id": txn.ID}, bson.M{"$set": bson.M{
+		"ops":             txn.Ops,
+		"notificationIds": txn.NotificationIDs,
+		"state":           domain.TxnCommitted,
+	}})
+	if err == nil && res.MatchedCount == 0 {
+		return domain.ErrNotFound
+	}
+	return err
+}
+
+// Abandon releases a claim whose work did not stand, so the next attempt is a
+// real retry rather than a lookup of a commit that never happened.
+func (r *TransactionRepo) Abandon(ctx context.Context, id string) error {
+	_, err := r.col.DeleteOne(ctx, bson.M{"_id": id, "state": domain.TxnApplying})
 	return err
 }
 
@@ -51,6 +117,33 @@ func (r *TransactionRepo) ListByBoard(ctx context.Context, boardID string, limit
 	defer cur.Close(ctx)
 	var out []*domain.Transaction
 	return out, cur.All(ctx, &out)
+}
+
+// DeleteByUser removes every transaction a user authored.
+//
+// The journal was the one collection account deletion never touched, and it is
+// the one that holds the most: Op.Changes and Op.UndoChanges are full content
+// snapshots — text previews, table cells, document bodies — so "delete my
+// account" left a complete, queryable copy of everything the person had ever
+// written, keyed by their own userId, in a product that ships a privacy tab and
+// a data-export endpoint.
+func (r *TransactionRepo) DeleteByUser(ctx context.Context, sub string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"userId": sub})
+	return err
+}
+
+// DeleteOlderThan trims the journal past the retention window.
+//
+// This is the highest-write collection in the system and it had no retention at
+// all, while the elements it describes are purged at 90 days — so most rows
+// eventually described elements that no longer existed, degrading exactly the
+// revert and audit features that make agent runs trustworthy.
+func (r *TransactionRepo) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.col.DeleteMany(ctx, bson.M{"createdAt": bson.M{"$lt": cutoff}})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
 }
 
 // ---- users -----------------------------------------------------------------
@@ -146,6 +239,31 @@ func (r *CommentRepo) Update(ctx context.Context, c *domain.Comment) error {
 	if err == nil && res.MatchedCount == 0 {
 		return domain.ErrNotFound
 	}
+	return err
+}
+
+// Delete removes one message. Reachable only from the failure-cleanup path, not
+// from any UI verb — §4.17's "messages cannot be removed from a thread once
+// posted" is a rule about what a PERSON may do, and it was being enforced by the
+// storage layer having no delete at all.
+func (r *CommentRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.col.DeleteOne(ctx, bson.M{"_id": id})
+	return err
+}
+
+// DeleteByThread removes a thread's messages when the thread element itself is
+// permanently deleted. Without it, purging a COMMENT_THREAD — by trash sweep, by
+// board hard-delete, or by account deletion — left its messages behind as
+// permanently orphaned, permanently un-attributable text whose reaction maps
+// still held live users' subject ids.
+func (r *CommentRepo) DeleteByThread(ctx context.Context, threadID string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"threadId": threadID})
+	return err
+}
+
+// DeleteByAuthor removes everything one person wrote. Account deletion only.
+func (r *CommentRepo) DeleteByAuthor(ctx context.Context, sub string) error {
+	_, err := r.col.DeleteMany(ctx, bson.M{"authorId": sub})
 	return err
 }
 
@@ -260,6 +378,22 @@ func (r *AttachmentRepo) DeleteByOwner(ctx context.Context, ownerSub string) err
 	return err
 }
 
+// ListByOwner enumerates a person's uploads so the bytes can be removed before
+// the rows that name them are. The index existed and the method did not, which
+// is the whole reason "this permanently deletes all uploaded files" was false:
+// DeleteByOwner is a row delete and nothing else, so every image and PDF stayed
+// in the bucket, still fetchable through the unauthenticated blob route, with
+// nothing left in the database able to enumerate what had survived.
+func (r *AttachmentRepo) ListByOwner(ctx context.Context, ownerSub string) ([]*domain.Attachment, error) {
+	cur, err := r.col.Find(ctx, bson.M{"ownerId": ownerSub})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []*domain.Attachment
+	return out, cur.All(ctx, &out)
+}
+
 // ---- notifications ---------------------------------------------------------------
 
 type NotificationRepo struct{ col *mongo.Collection }
@@ -307,5 +441,15 @@ func (r *NotificationRepo) MarkRead(ctx context.Context, sub string, ids []strin
 
 func (r *NotificationRepo) DeleteByUser(ctx context.Context, sub string) error {
 	_, err := r.col.DeleteMany(ctx, bson.M{"userId": sub})
+	return err
+}
+
+// DeleteByIDs withdraws specific notifications — the bells a reverted
+// transaction rang. See service.Notifier.Retract.
+func (r *NotificationRepo) DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.col.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": ids}})
 	return err
 }

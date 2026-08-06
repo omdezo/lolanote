@@ -41,12 +41,23 @@ const (
 	// removes overlap and ragged spacing. The least destructive option, and the
 	// right answer for "clean this up" on a board somebody arranged by hand.
 	LayoutTidy Layout = "tidy"
+	// LayoutTree draws a hierarchy: parents above, children beneath and centred.
+	// Uses the connections already on the board to decide what contains what.
+	LayoutTree Layout = "tree"
+	// LayoutFlow draws a process left to right in dependency order — what can
+	// happen first on the left, what waits on it to its right.
+	LayoutFlow Layout = "flow"
 )
+
+// shapedLayouts need the board's CONNECTIONS, not just the elements: a
+// hierarchy and a process are relationships, and without lines between the
+// boxes there is no shape to draw.
+func (l Layout) needsEdges() bool { return l == LayoutTree || l == LayoutFlow }
 
 // ValidLayout reports whether a name is one the server can compute.
 func ValidLayout(l Layout) bool {
 	switch l {
-	case LayoutGrid, LayoutRow, LayoutColumn, LayoutTidy:
+	case LayoutGrid, LayoutRow, LayoutColumn, LayoutTidy, LayoutTree, LayoutFlow:
 		return true
 	}
 	return false
@@ -125,6 +136,26 @@ func ComputeArrangement(ids []string, layout Layout, scope *BoardScope) (map[str
 	}
 	originX = snapTo(originX, GridSnap)
 	originY = snapTo(originY, GridSnap)
+
+	if layout.needsEdges() {
+		nodes := make([]node, 0, len(targets))
+		for _, t := range targets {
+			nodes = append(nodes, node{id: t.id, w: t.w, h: t.h})
+		}
+		edges := edgesAmong(ids, scope)
+		if len(edges) == 0 {
+			// Refused rather than silently drawn as a grid: "arrange these as a
+			// flow" on elements nothing connects is a request the board cannot
+			// answer, and quietly doing something else is how a person learns
+			// the tool does not listen.
+			return nil, fmt.Errorf("nothing here is connected, so there is no %s to draw — "+
+				"connect the items first, then arrange them", layout)
+		}
+		if layout == LayoutTree {
+			return layoutTree(nodes, edges, originX, originY), nil
+		}
+		return layoutFlow(nodes, edges, originX, originY), nil
+	}
 
 	switch layout {
 	case LayoutRow:
@@ -308,4 +339,44 @@ func defaultArrangeHeight(t domain.ElementType) float64 {
 		return 160
 	}
 	return 120
+}
+
+// edgesAmong collects the connections that run between the given elements.
+//
+// A connector whose two endpoints are both in the set is a relationship the
+// arrangement can use. Lines with a loose end, or pointing at something outside
+// the selection, are ignored: they describe a shape larger than the one being
+// drawn.
+//
+// It used to iterate `scope.Elements` looking for TypeLine — a set that could
+// never contain one, because the walk skipped LINE entirely. So this returned
+// zero edges on every board that had a diagram, and arrange(ids,"flow") and
+// arrange(ids,"tree") — the whole workflow-design capability — silently fell
+// back to an edgeless layout on precisely the boards they were built for.
+// scope.Edges is where a connector lives now.
+func edgesAmong(ids []string, scope *BoardScope) []edge {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []edge
+	for _, e := range scope.Edges {
+		if !want[e.FromID] || !want[e.ToID] {
+			continue
+		}
+		out = append(out, edge{from: e.FromID, to: e.ToID})
+	}
+	// Deterministic: scope.Edges is already ordered, and this keeps the
+	// guarantee local rather than depending on the compiler's ordering.
+	stableSortBy2(out)
+	return out
+}
+
+func stableSortBy2(s []edge) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && (s[j].from < s[j-1].from ||
+			(s[j].from == s[j-1].from && s[j].to < s[j-1].to)); j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }

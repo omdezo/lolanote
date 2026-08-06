@@ -9,6 +9,8 @@ import { create } from 'zustand';
 import { uploadFile } from '../../api/client';
 import { ICON_CATALOG, LETTER_ICONS, searchIcons } from '../../lib/iconCatalog';
 import { updateOp, useBoard } from '../../store/boardStore';
+import { ownsEscape, useView } from '../../store/viewStore';
+import { useT } from '../../i18n';
 import { toast } from './Toaster';
 import { SearchIcon } from '../Icons';
 
@@ -45,7 +47,11 @@ export const useBoardStyle = create<BoardStyleState>((set) => ({
   close: () => set({ pos: null, elementId: '' }),
 }));
 
+/** This popover's entry on the shared Escape stack (viewStore.overlays). */
+const OVERLAY = 'board-style-popover';
+
 export function BoardStylePopoverHost() {
+  const t = useT();
   const { pos, elementId, mode, close } = useBoardStyle();
   const element = useBoard((s) => s.elements[elementId]);
   const commitTransaction = useBoard((s) => s.commitTransaction);
@@ -53,15 +59,22 @@ export function BoardStylePopoverHost() {
 
   useEffect(() => {
     if (!pos) return;
+    // On the shared Escape stack — see viewStore.overlays. Without it this
+    // popover's Escape also reached the agent shell's listener, which used to
+    // discard a pending plan.
+    useView.getState().pushOverlay(OVERLAY);
     const onDown = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) close();
     };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && ownsEscape(OVERLAY)) { e.stopPropagation(); close(); }
+    };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('keydown', onKey);
+      useView.getState().popOverlay(OVERLAY);
     };
   }, [pos, close]);
 
@@ -78,14 +91,14 @@ export function BoardStylePopoverHost() {
     <div ref={ref} className="board-style-pop" style={{ left: x, top: y, width }} onPointerDown={(e) => e.stopPropagation()}>
       {mode === 'color' ? (
         <>
-          <div className="bsp-label">Color</div>
+          <div className="bsp-label">{t('line.color')}</div>
           <div className="bsp-grid bsp-colors">
             {COLORS.map((color) => (
               <button
                 key={color || 'auto'}
                 className={`bsp-swatch${(current.color ?? '') === color ? ' on' : ''}${color === '' ? ' auto' : ''}`}
                 style={color ? { background: color } : undefined}
-                title={color === '' ? 'Automatic' : undefined}
+                title={color === '' ? t('style.auto') : undefined}
                 onClick={() => set({ color: color || null })}
               >
                 {color === '' && 'A'}
@@ -115,6 +128,7 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
   onPick: (icon: string) => void;
   onImage: (url: string) => void;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<IconTab>('recommended');
   const [query, setQuery] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -131,7 +145,7 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
       const { url } = await uploadFile(file);
       onImage(url);
     } catch {
-      toast.error('Icon upload failed');
+      toast.error(t('toast.iconFailed'));
     } finally {
       setUploading(false);
     }
@@ -141,25 +155,26 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
     <div className="icon-picker">
       <div className="ip-side">
         <button className={`ip-tab${tab === 'recommended' && !searching ? ' on' : ''}`} onClick={() => { setTab('recommended'); setQuery(''); }}>
-          Recommended
+          {t('style.recommended')}
         </button>
         <button className={`ip-tab${tab === 'letters' && !searching ? ' on' : ''}`} onClick={() => { setTab('letters'); setQuery(''); }}>
-          Letters &amp; numbers
+          {t('style.letters')}
         </button>
         <button className={`ip-tab${tab === 'upload' && !searching ? ' on' : ''}`} onClick={() => { setTab('upload'); setQuery(''); }}>
-          Upload an image
+          {t('style.upload')}
         </button>
         <div className="ip-search">
           <input
             dir="auto"
-            placeholder="Search icons…"
+            aria-label={t('style.searchIcons')}
+            placeholder={t('style.searchIcons')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <SearchIcon size={13} />
         </div>
         {(currentIcon || hasImage) && (
-          <button className="ip-clear" onClick={() => onPick('')}>Remove icon</button>
+          <button className="ip-clear" onClick={() => onPick('')}>{t('style.removeIcon')}</button>
         )}
       </div>
 
@@ -198,7 +213,7 @@ function IconPicker({ currentIcon, hasImage, onPick, onImage }: {
           </div>
         ) : (
           <div className="ip-upload">
-            <p>Use any image as this board's icon — it's cropped to the tile.</p>
+            <p>{t('style.uploadHint')}</p>
             <button className="btn-primary" disabled={uploading} onClick={() => fileRef.current?.click()}>
               {uploading ? 'Uploading…' : 'Choose an image'}
             </button>

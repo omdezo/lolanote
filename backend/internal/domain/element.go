@@ -86,17 +86,107 @@ type Location struct {
 
 // ACL is meaningful on BOARD elements and cascades to all nested content
 // (sharing a board shares its whole subtree, §6.1).
+//
+// The two link tokens are bearer credentials for the whole subtree, and they
+// are `json:"-"` so no serialization boundary can emit one by accident. A view
+// link holder used to be able to read the board's PUBLIC EDIT token straight
+// out of an ordinary board GET, which turns read-only into read-write with no
+// step in between. service.ShareState is the one door they leave through.
 type ACL struct {
 	OwnerID        string    `bson:"ownerId" json:"ownerId"`
 	Editors        []string  `bson:"editors" json:"editors"`
-	PublicEditLink string    `bson:"publicEditLink,omitempty" json:"publicEditLink,omitempty"`
+	PublicEditLink string    `bson:"publicEditLink,omitempty" json:"-"`
 	ViewLink       *ViewLink `bson:"viewLink,omitempty" json:"viewLink,omitempty"`
+	// AgentPolicy is the owner's answer to "who may run the assistant here, and
+	// how far may it go without me". Nil means the defaults below.
+	AgentPolicy *AgentPolicy `bson:"agentPolicy,omitempty" json:"agentPolicy,omitempty"`
+}
+
+// AgentAllow is the audience a board-level agent permission is open to.
+type AgentAllow string
+
+const (
+	// AgentAllowUnset means "use the default", which differs per field.
+	AgentAllowUnset AgentAllow = ""
+	// AgentAllowNone: nobody, including the owner.
+	AgentAllowNone AgentAllow = "none"
+	// AgentAllowOwner: only the person who owns the board.
+	AgentAllowOwner AgentAllow = "owner"
+	// AgentAllowEditors: anyone the ACL names as an editor.
+	AgentAllowEditors AgentAllow = "editors"
+)
+
+// AgentPolicy is a property of the BOARD, not of the request.
+//
+// Delegation was correctly attenuated per principal and completely unaware that
+// a board has more than one stakeholder. The only consent gate on a run was
+// "can the caller edit here", so a collaborator could set autonomy=auto and
+// have thirty model-chosen actions land on somebody else's board with no
+// preview by anyone but themselves — while the owner had no way to say "no AI
+// on this board", "preview only", or "at most $2/day of assistant here", which
+// are ordinary requirements for a client-facing or contractual board.
+//
+// Owner-writable only, through the same requireOwner gate sharing goes through:
+// the place an owner already decides who may edit is where they decide who may
+// automate.
+type AgentPolicy struct {
+	// Allow is who may start a run at all. Default: editors.
+	Allow AgentAllow `bson:"allow,omitempty" json:"allow,omitempty"`
+	// AutoApply is who may have a plan written without a human preview.
+	// Default: owner — which is the whole point of the item. A non-owner asking
+	// for auto is DOWNGRADED to preview with a disclosed reason, never refused:
+	// a hard refusal makes the assistant look broken on every shared board.
+	AutoApply AgentAllow `bson:"autoApply,omitempty" json:"autoApply,omitempty"`
+	// DailyCapUSD bounds model spend attributable to this board per UTC day.
+	// Zero means "only the deployment-wide cap applies".
+	DailyCapUSD float64 `bson:"dailyCapUsd,omitempty" json:"dailyCapUsd,omitempty"`
+	// ChargedTo says whose ledger a run here draws from: "runner" (default) or
+	// "owner". An owner who hosts a contractor's work can choose to carry it.
+	ChargedTo string `bson:"capChargedTo,omitempty" json:"capChargedTo,omitempty"`
+}
+
+// ChargedToOwner reports whether runs on this board draw on the owner's budget.
+func (a *AgentPolicy) ChargedToOwner() bool { return a != nil && a.ChargedTo == "owner" }
+
+// MayRun reports whether a principal holding this role may start a run here.
+// Nil policy — every board that predates the field — means editors, which is
+// exactly what shipped before.
+func (a *AgentPolicy) MayRun(isOwner bool) bool {
+	allow := AgentAllowEditors
+	if a != nil && a.Allow != AgentAllowUnset {
+		allow = a.Allow
+	}
+	switch allow {
+	case AgentAllowNone:
+		return false
+	case AgentAllowOwner:
+		return isOwner
+	default:
+		return true
+	}
+}
+
+// MayAutoApply reports whether this principal may skip the preview.
+// The default is owner-only, deliberately narrower than what shipped.
+func (a *AgentPolicy) MayAutoApply(isOwner bool) bool {
+	allow := AgentAllowOwner
+	if a != nil && a.AutoApply != AgentAllowUnset {
+		allow = a.AutoApply
+	}
+	switch allow {
+	case AgentAllowNone:
+		return false
+	case AgentAllowEditors:
+		return true
+	default:
+		return isOwner
+	}
 }
 
 // ViewLink is a read-only or presentation share link with optional feedback
 // rights, password, and welcome message.
 type ViewLink struct {
-	Token          string `bson:"token" json:"token"`
+	Token          string `bson:"token" json:"-"`
 	AllowFeedback  bool   `bson:"allowFeedback" json:"allowFeedback"`
 	RequireAccount bool   `bson:"requireAccount" json:"requireAccount"`
 	PasswordHash   string `bson:"passwordHash,omitempty" json:"-"`

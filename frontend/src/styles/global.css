@@ -14,7 +14,18 @@
 
   --ink: #1d1d1f;
   --ink-2: #48484d;
-  --ink-3: #86868b;
+  /* AX15. --ink-3 was #86868b: 3.62:1 on --surface and 3.33:1 on --canvas,
+     across 87 declarations, every one of them at 10–13px where the AA floor is
+     4.5:1. It is not a decorative token — it is the colour of `.ac-decide-text`
+     ("12 changes · 4 new"), of `.ap-kind` (the classification of every
+     attribute edit) and of `.ghost-count` (the roll-up going into each nested
+     board). The summary of what you are about to approve was rendered in the
+     one colour that fails, and on a laptop in Omani daylight it is gone.
+     #6e6e73 is 5.07:1 on white and 4.66:1 on the canvas and reads as the same
+     grey. Today's value survives as --ink-4 for genuinely decorative marks —
+     rules, dividers, disabled glyphs — that carry no text. */
+  --ink-3: #6e6e73;
+  --ink-4: #86868b;
   --hairline: rgba(60, 60, 67, 0.12);
   --hairline-strong: rgba(60, 60, 67, 0.2);
 
@@ -22,9 +33,22 @@
   --accent-deep: #4a48c4;
   --accent-rgb: 94, 92, 230;
   --accent-tint: rgba(94, 92, 230, 0.1);
+  /* Fill and text are different jobs with different floors. --danger is the
+     fill (buttons, badges, 3:1 as a boundary); --danger-text is the same red
+     told to carry words — #ff3b30 is 3.55:1 on white, which is what `.ac-warn`,
+     the destructive-count warning, was drawn in. */
   --danger: #ff3b30;
+  --danger-text: #d70015;
   --danger-tint: rgba(255, 59, 48, 0.1);
   --ok: #34c759;
+  --ok-text: #1e7a34;
+  /* Same split for the amber JN21 needs. `--warn` is the boundary a row draws
+     around itself; `--warn-text` is the amber told to carry "6 days left",
+     which is the sentence someone decides on. #8a5a00 is 5.1:1 on white. */
+  --warn: #f2a20d;
+  --warn-text: #8a5a00;
+  /* The focus indicator is NOT the accent — see AX16 below. */
+  --focus-ring: #0b57d0;
 
   --hover: rgba(60, 60, 67, 0.07);
   --hover-strong: rgba(60, 60, 67, 0.11);
@@ -33,8 +57,10 @@
   --overlay-bg: #1d1d1f;
   --column-bg: rgba(233, 233, 237, 0.72);
   --comment-bg: #fffbea;
-  --comment-title: #b3930a;
-  --comment-author: #a08a2d;
+  /* 2.85:1 and 3.28:1 on --comment-bg — a comment is text somebody wrote for
+     somebody else to read, so both of these are AA text, not decoration. */
+  --comment-title: #7a6300;
+  --comment-author: #6d5a12;
   --comment-border: rgba(179, 147, 10, 0.18);
   --comment-input-bg: #ffffff;
 
@@ -45,9 +71,15 @@
   --r-card: 10px;
   --r-panel: 14px;
   --r-pill: 999px;
-  --topbar-h: 52px;
-  --rail-w: 76px;
+  /* Chrome heights in rem, so they grow with the type rather than clipping it.
+     52px and 76px at a 16px root. */
+  --topbar-h: 3.25rem;
+  --rail-w: 4.75rem;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Density is a multiplier on the browser's own size, not a replacement for
+     it — see the html rule below. */
+  --type-scale: 1;
 }
 
 /* ============ Dark theme (Settings → Appearance) ============ */
@@ -60,9 +92,27 @@
 
   --ink: #f5f5f7;
   --ink-2: #c9c9ce;
-  --ink-3: #8e8e93;
+  /* 4.27:1 on this surface at 10–13px; see the light-theme note. */
+  --ink-3: #a1a1a6;
+  --ink-4: #8e8e93;
   --hairline: rgba(255, 255, 255, 0.10);
   --hairline-strong: rgba(255, 255, 255, 0.20);
+
+  /* The light-theme indigo carries 5.06:1 on white and 2.75:1 on this
+     surface — below the 3:1 floor for any text or UI boundary drawn in it.
+     The accent was the only token that did not get a dark value, so every
+     accent-coloured label in dark mode has been failing AA since dark mode
+     shipped. A Settings accent still overrides both, as it always did. */
+  --accent: #9d9bff;
+  --accent-deep: #b0aeff;
+  --accent-rgb: 157, 155, 255;
+  --accent-tint: rgba(157, 155, 255, 0.14);
+  --danger-text: #ff6961;
+  --ok-text: #30d158;
+  /* 8.1:1 on the dark surface — the light-theme #8a5a00 would be 2.0:1 here,
+     which is the failure mode --ink-3 had for years. */
+  --warn-text: #f0b429;
+  --focus-ring: #8ab4f8;
 
   --hover: rgba(255, 255, 255, 0.08);
   --hover-strong: rgba(255, 255, 255, 0.14);
@@ -88,16 +138,28 @@
 
 /* Compact density tightens the chrome */
 :root[data-density="compact"] {
-  --topbar-h: 44px;
-  --rail-w: 64px;
+  --topbar-h: 2.75rem;
+  --rail-w: 4rem;
+  --type-scale: 0.93;
 }
-:root[data-density="compact"] .rail-btn { width: 52px; padding: 6px 0 5px; }
-:root[data-density="compact"] .rail-btn span { font-size: 9.5px; }
-:root[data-density="compact"] body,
-:root[data-density="compact"] .note-card .ProseMirror { font-size: 13px; }
+:root[data-density="compact"] .rail-btn { width: 3.25rem; padding: 6px 0 5px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+
+/* ---- AX25, WCAG 1.4.4 ------------------------------------------------
+   A fixed 14px on the body, against several hundred more px sizes, meant the
+   browser's own text setting did nothing at all: a person who has set their
+   default to 24px because 14 is unreadable to them opened this app and got 14.
+   Text-only resize is not page zoom, and it is the setting people who need
+   larger text actually use.
+
+   The root now takes the browser's size and applies density as a MULTIPLIER on
+   it rather than as a replacement, and every size in this stylesheet is a rem
+   off that root — so 200% resize is 200% here too, chrome heights included. */
+html {
+  font-size: calc(100% * var(--type-scale));
+}
 body {
   font-family: var(--font);
   color: var(--ink);
@@ -105,7 +167,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; padding: 0; }
@@ -129,30 +191,56 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .brand {
   display: flex; align-items: center; gap: 8px;
-  margin-right: 14px; user-select: none;
+  margin-inline-end: 14px; user-select: none;
 }
 .brand-mark {
   width: 28px; height: 28px; border-radius: 8px;
   background: linear-gradient(135deg, #6e6cf0, #4a48c4);
   color: #fff; display: flex; align-items: center; justify-content: center;
-  font-family: Georgia, 'Times New Roman', serif; font-size: 17px; font-weight: 700;
+  font-family: Georgia, 'Times New Roman', serif; font-size: 1.0625rem; font-weight: 700;
   box-shadow: 0 2px 6px rgba(94, 92, 230, 0.35);
 }
-.brand-name { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.brand-name { font-size: 0.9375rem; font-weight: 700; letter-spacing: -0.02em; }
 .brand-name em { font-style: normal; color: var(--accent); }
 
 .breadcrumbs { display: flex; align-items: center; gap: 0; overflow: hidden; flex: 1; min-width: 0; }
+
+/* The breadcrumb became a real <ol>/<li> so a screen reader announces "list, 2
+   items" instead of a row of loose buttons — and the CSS for the two new
+   classes was never written. A browser given an unstyled <ol> does exactly what
+   it should: block layout, decimal markers, indentation. The trail rendered as
+      1. Home
+      >
+      2. Filmuuhjk
+   stacked down the topbar, numbers and all. Correct semantics, no style, and
+   the accessibility fix was the most visible defect on the screen — the second
+   time in one wave that markup shipped without its stylesheet. */
+.crumb-list {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crumb-item {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .crumb {
-  color: var(--ink-3); font-size: 13px; padding: 5px 8px; border-radius: 7px;
+  color: var(--ink-3); font-size: 0.8125rem; padding: 5px 8px; border-radius: 7px;
   white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;
   transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
 .crumb:hover { background: var(--hover); color: var(--ink); }
-.crumb.current { color: var(--ink); font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
+.crumb.current { color: var(--ink); font-weight: 600; font-size: 0.875rem; letter-spacing: -0.01em; }
 .crumb-sep { color: var(--ink-3); display: flex; opacity: 0.55; }
 
 .topbar-btn {
-  color: var(--ink-2); font-size: 13px; font-weight: 500;
+  color: var(--ink-2); font-size: 0.8125rem; font-weight: 500;
   height: 32px; padding: 0 11px; border-radius: 8px;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease);
@@ -173,11 +261,11 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .avatar {
   width: 27px; height: 27px; border-radius: 50%;
   background: linear-gradient(135deg, #6e6cf0, #4a48c4);
-  color: #fff; font-size: 10.5px; font-weight: 700; display: flex; align-items: center;
-  justify-content: center; border: 2px solid var(--surface); margin-left: -7px;
+  color: #fff; font-size: 0.65625rem; font-weight: 700; display: flex; align-items: center;
+  justify-content: center; border: 2px solid var(--surface); margin-inline-start: -7px;
   text-transform: uppercase; letter-spacing: 0.02em;
 }
-.avatar:first-child { margin-left: 0; }
+.avatar:first-child { margin-inline-start: 0; }
 
 /* ============ Workspace ============ */
 .workspace { flex: 1; display: flex; position: relative; overflow: hidden; }
@@ -187,7 +275,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .rail {
   width: var(--rail-w);
   background: var(--surface);
-  border-right: 1px solid var(--hairline);
+  border-inline-end: 1px solid var(--hairline);
   display: flex; flex-direction: column; align-items: center;
   padding: 10px 8px;
   z-index: 30;
@@ -204,19 +292,19 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   margin-bottom: 2px;
   position: relative;
 }
-.rail-btn span { font-size: 10.5px; font-weight: 500; letter-spacing: 0; color: var(--ink-3); transition: color 0.15s; }
+.rail-btn span { font-size: 0.65625rem; font-weight: 500; letter-spacing: 0; color: var(--ink-3); transition: color 0.15s; }
 .rail-btn:hover { background: var(--hover); color: var(--ink); }
 .rail-btn:hover span { color: var(--ink-2); }
 .rail-btn:active { transform: scale(0.94); }
 .rail-btn.active { background: var(--accent-tint); color: var(--accent); }
 .rail-btn.active span { color: var(--accent); font-weight: 600; }
 .rail-btn.danger-target { margin-top: 4px; }
-.rail-btn.danger-target.drop-hot { background: var(--danger-tint); color: var(--danger); transform: scale(1.08); }
-.rail-btn.danger-target.drop-hot span { color: var(--danger); }
+.rail-btn.danger-target.drop-hot { background: var(--danger-tint); color: var(--danger-text); transform: scale(1.08); }
+.rail-btn.danger-target.drop-hot span { color: var(--danger-text); }
 
 /* More-tools flyout */
 .flyout {
-  position: absolute; left: calc(var(--rail-w) + 10px);
+  position: absolute; inset-inline-start: calc(var(--rail-w) + 10px);
   background: var(--glass);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -229,7 +317,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .flyout-btn {
   padding: 10px 0 8px; border-radius: 10px;
   display: flex; flex-direction: column; align-items: center; gap: 5px;
-  color: var(--ink-2); font-size: 10.5px; font-weight: 500;
+  color: var(--ink-2); font-size: 0.65625rem; font-weight: 500;
   transition: background 0.15s var(--ease), transform 0.1s var(--ease);
 }
 .flyout-btn:hover { background: var(--hover); color: var(--ink); }
@@ -248,7 +336,15 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   touch-action: none;
 }
 .canvas-viewport.line-mode, .canvas-viewport.draw-mode { cursor: crosshair; }
-.canvas-layer { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+/* THE EXCLUSION BOUNDARY FOR RTL.
+   Everything outside this layer mirrors with <html dir>; nothing inside it
+   does. A card's `left`/`top` are absolute board coordinates shared with every
+   collaborator and stored on the server — mirroring the canvas would move
+   everyone's boards the moment one person switched the UI to Arabic, and the
+   line layer, the ghosts and the remote cursors all read the same space. Text
+   inside a card stays bidi-correct the way it always has: each element carries
+   its own `dir` attribute (auto by default), which overrides this. */
+.canvas-layer { position: absolute; top: 0; left: 0; transform-origin: 0 0; direction: ltr; }
 
 .marquee {
   position: absolute; border: 1px solid var(--accent);
@@ -262,7 +358,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   background: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
 .remote-cursor .name {
-  background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600;
+  background: var(--accent); color: #fff; font-size: 0.65625rem; font-weight: 600;
   border-radius: var(--r-pill); padding: 2px 8px; margin-top: 4px; margin-left: 6px; white-space: nowrap;
   box-shadow: 0 2px 6px rgba(94, 92, 230, 0.4);
 }
@@ -270,13 +366,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 /* Mode banner (line / draw) */
 .mode-banner {
   position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-  background: var(--overlay-bg); color: #fff; font-size: 12.5px; font-weight: 500;
+  background: var(--overlay-bg); color: #fff; font-size: 0.78125rem; font-weight: 500;
   border-radius: var(--r-pill); padding: 7px 16px; z-index: 45;
   display: flex; align-items: center; gap: 10px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.25);
 }
 .mode-banner button {
-  color: rgba(255,255,255,0.7); font-size: 11px; font-weight: 600;
+  color: rgba(255,255,255,0.7); font-size: 0.6875rem; font-weight: 600;
   border: 1px solid rgba(255,255,255,0.25); border-radius: var(--r-pill); padding: 2px 9px;
 }
 .mode-banner button:hover { color: #fff; border-color: rgba(255,255,255,0.6); }
@@ -299,7 +395,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 
 .remote-edit-badge {
   position: absolute; top: -24px; left: 0; background: var(--ok); color: #fff;
-  font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); white-space: nowrap;
+  font-size: 0.625rem; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); white-space: nowrap;
 }
 .el .resize-handle {
   position: absolute; right: -5px; bottom: -5px; width: 14px; height: 14px;
@@ -331,19 +427,19 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   transition: background 0.12s, color 0.12s;
 }
 .el-actions button:hover { background: var(--hover); color: var(--ink); }
-.el-actions button.danger:hover { background: var(--danger-tint); color: var(--danger); }
+.el-actions button.danger:hover { background: var(--danger-tint); color: var(--danger-text); }
 
 /* ============ Note card ============ */
 .note-card { padding: 13px 15px; min-height: 46px; cursor: default; }
-.note-card .ProseMirror { outline: none; font-size: 14px; line-height: 1.55; cursor: text; color: var(--ink); }
+.note-card .ProseMirror { outline: none; font-size: 0.875rem; line-height: 1.55; cursor: text; color: var(--ink); }
 .note-card .ProseMirror p { margin: 0 0 6px; }
 .note-card .ProseMirror p:last-child { margin-bottom: 0; }
-.note-card .ProseMirror h1 { font-size: 21px; letter-spacing: -0.02em; margin: 0 0 8px; }
-.note-card .ProseMirror h2 { font-size: 16.5px; letter-spacing: -0.01em; margin: 0 0 6px; }
+.note-card .ProseMirror h1 { font-size: 1.3125rem; letter-spacing: -0.02em; margin: 0 0 8px; }
+.note-card .ProseMirror h2 { font-size: 1.03125rem; letter-spacing: -0.01em; margin: 0 0 6px; }
 .note-card .ProseMirror ul, .note-card .ProseMirror ol { margin: 0 0 6px; padding-inline-start: 22px; }
 .note-card .ProseMirror pre {
   background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 7px;
-  padding: 9px 11px; font-size: 12.5px;
+  padding: 9px 11px; font-size: 0.78125rem;
   font-family: 'SF Mono', ui-monospace, Consolas, monospace; overflow-x: auto;
 }
 .note-card .ProseMirror blockquote {
@@ -353,7 +449,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   content: attr(data-placeholder); color: var(--ink-3); float: left; height: 0; pointer-events: none;
 }
 .note-card.heading-note { padding: 4px 8px; background: transparent; }
-.note-card.heading-note .ProseMirror { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; color: var(--ink); }
+.note-card.heading-note .ProseMirror { font-size: 1.875rem; font-weight: 700; letter-spacing: -0.025em; color: var(--ink); }
 .note-card.heading-note .ProseMirror p { margin: 0; }
 
 /* Formatting bar (appears while editing) */
@@ -364,7 +460,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .fmt-bar button {
   color: rgba(255,255,255,0.75); width: 30px; height: 30px; border-radius: 7px;
-  display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; font-size: 0.78125rem; font-weight: 600;
 }
 .fmt-bar button:hover { background: rgba(255,255,255,0.14); color: #fff; }
 .fmt-bar button.on { background: var(--accent); color: #fff; }
@@ -383,10 +479,10 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .board-card:hover .tile { transform: translateY(-2px) scale(1.03); box-shadow: 0 10px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.25); }
 .board-card .board-title {
-  font-weight: 600; font-size: 13px; text-align: center; letter-spacing: -0.01em;
+  font-weight: 600; font-size: 0.8125rem; text-align: center; letter-spacing: -0.01em;
   max-width: 140px; overflow: hidden; text-overflow: ellipsis; line-height: 1.25;
 }
-.board-card .board-stats { font-size: 11px; color: var(--ink-3); text-align: center; margin-top: -4px; }
+.board-card .board-stats { font-size: 0.6875rem; color: var(--ink-3); text-align: center; margin-top: -4px; }
 .board-card .alias-badge {
   position: absolute; right: -5px; bottom: -5px; width: 22px; height: 22px; border-radius: 50%;
   background: var(--surface); color: var(--ink-2); display: flex; align-items: center; justify-content: center;
@@ -394,7 +490,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .board-title-input {
   border: none; outline: none; background: var(--surface); text-align: center;
-  font-weight: 600; font-size: 13px; width: 132px; border-radius: 6px; padding: 2px 4px;
+  font-weight: 600; font-size: 0.8125rem; width: 132px; border-radius: 6px; padding: 2px 4px;
   box-shadow: 0 0 0 2px var(--accent);
 }
 
@@ -409,12 +505,12 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .el.column.selected { box-shadow: 0 0 0 2px var(--accent); }
 .column-header { display: flex; align-items: center; gap: 6px; padding: 2px 6px 9px; cursor: grab; }
 .column-title {
-  font-weight: 700; font-size: 12.5px; border: none; background: none; flex: 1;
+  font-weight: 700; font-size: 0.78125rem; border: none; background: none; flex: 1;
   color: var(--ink); outline: none; text-transform: uppercase; letter-spacing: 0.05em;
 }
 .column-title::placeholder { text-transform: none; letter-spacing: 0; }
 .column-count {
-  background: var(--hover-strong); color: var(--ink-2); font-size: 11px; font-weight: 700;
+  background: var(--hover-strong); color: var(--ink-2); font-size: 0.6875rem; font-weight: 700;
   border-radius: var(--r-pill); padding: 2px 8px;
 }
 .column-collapse { color: var(--ink-3); display: flex; transition: transform 0.2s var(--ease); }
@@ -422,7 +518,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .column-body { display: flex; flex-direction: column; gap: 8px; min-height: 28px; }
 .column-body .el { position: relative !important; width: 100% !important; left: 0 !important; top: 0 !important; }
 .column-add {
-  color: var(--ink-3); font-size: 12.5px; font-weight: 500; padding: 8px; border-radius: 8px;
+  color: var(--ink-3); font-size: 0.78125rem; font-weight: 500; padding: 8px; border-radius: 8px;
   text-align: center; margin-top: 7px; border: 1.2px dashed var(--hairline-strong);
   display: flex; align-items: center; justify-content: center; gap: 5px;
   transition: all 0.15s var(--ease);
@@ -432,7 +528,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 /* ============ Task list ============ */
 .task-list { padding: 13px 15px; width: 280px; }
 .task-list .tl-title {
-  border: none; background: none; outline: none; font-weight: 700; font-size: 14.5px;
+  border: none; background: none; outline: none; font-weight: 700; font-size: 0.90625rem;
   width: 100%; margin-bottom: 8px; color: var(--ink); letter-spacing: -0.01em;
 }
 .task-row { display: flex; align-items: flex-start; gap: 9px; padding: 3.5px 0; }
@@ -443,14 +539,14 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .task-check.done { background: var(--accent); border-color: var(--accent); color: #fff; }
 .task-row .task-text {
-  flex: 1; border: none; background: none; outline: none; font-size: 13.5px; color: var(--ink);
+  flex: 1; border: none; background: none; outline: none; font-size: 0.84375rem; color: var(--ink);
 }
 .task-row.done .task-text { text-decoration: line-through; color: var(--ink-3); }
 .task-row .task-del { color: transparent; display: flex; }
 .task-row:hover .task-del { color: var(--ink-3); }
-.task-row .task-del:hover { color: var(--danger); }
+.task-row .task-del:hover { color: var(--danger-text); }
 .task-add {
-  border: none; background: none; outline: none; font-size: 13px; color: var(--ink-3);
+  border: none; background: none; outline: none; font-size: 0.8125rem; color: var(--ink-3);
   width: 100%; padding: 5px 0 0 27px;
 }
 
@@ -458,9 +554,9 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .link-card { width: 260px; overflow: hidden; cursor: pointer; border-radius: var(--r-card); }
 .link-thumb { width: 100%; height: 132px; object-fit: cover; display: block; background: var(--surface-2); }
 .link-body { padding: 11px 13px; }
-.link-title { font-weight: 600; font-size: 13.5px; margin-bottom: 3px; word-break: break-word; letter-spacing: -0.01em; }
-.link-desc { font-size: 12px; color: var(--ink-2); max-height: 52px; overflow: hidden; line-height: 1.45; }
-.link-host { font-size: 11px; color: var(--ink-3); margin-top: 7px; display: flex; align-items: center; gap: 5px; }
+.link-title { font-weight: 600; font-size: 0.84375rem; margin-bottom: 3px; word-break: break-word; letter-spacing: -0.01em; }
+.link-desc { font-size: 0.75rem; color: var(--ink-2); max-height: 52px; overflow: hidden; line-height: 1.45; }
+.link-host { font-size: 0.6875rem; color: var(--ink-3); margin-top: 7px; display: flex; align-items: center; gap: 5px; }
 .link-host::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .link-embed { width: 100%; aspect-ratio: 16 / 9; border: none; display: block; background: #000; }
 .embed-tall { aspect-ratio: auto; height: 152px; }
@@ -469,7 +565,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .image-card { overflow: hidden; border-radius: var(--r-card); }
 .image-card img { display: block; width: 100%; pointer-events: none; }
 .image-caption {
-  width: 100%; border: none; background: none; outline: none; font-size: 12px;
+  width: 100%; border: none; background: none; outline: none; font-size: 0.75rem;
   color: var(--ink-2); padding: 8px 11px; text-align: center;
 }
 .file-card { width: 232px; padding: 13px; display: flex; align-items: center; gap: 11px; }
@@ -478,8 +574,8 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   background: var(--accent-tint); color: var(--accent);
   display: flex; align-items: center; justify-content: center;
 }
-.file-name { font-size: 13px; font-weight: 600; word-break: break-all; line-height: 1.3; }
-.file-size { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.file-name { font-size: 0.8125rem; font-weight: 600; word-break: break-all; line-height: 1.3; }
+.file-size { font-size: 0.6875rem; color: var(--ink-3); margin-top: 2px; }
 .audio-card { width: 280px; padding: 12px; }
 .audio-card audio { width: 100%; height: 36px; display: block; }
 .audio-card .file-name { margin-bottom: 8px; }
@@ -490,7 +586,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .swatch-card { width: 148px; overflow: hidden; border-radius: var(--r-card); }
 .swatch-color { height: 92px; cursor: pointer; }
 .swatch-value {
-  padding: 9px 12px; font-size: 12px; font-family: 'SF Mono', ui-monospace, Consolas, monospace;
+  padding: 9px 12px; font-size: 0.75rem; font-family: 'SF Mono', ui-monospace, Consolas, monospace;
   display: flex; justify-content: space-between; align-items: center; color: var(--ink-2);
 }
 .swatch-value button { color: var(--ink-3); display: flex; }
@@ -506,7 +602,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .qn-table td { border: 1px solid var(--hairline); padding: 0; min-width: 84px; height: 32px; }
 .qn-table td input {
   border: none; outline: none; background: none; width: 100%; height: 100%;
-  padding: 6px 9px; font-size: 12.5px;
+  padding: 6px 9px; font-size: 0.78125rem;
 }
 .qn-table td input:focus { background: var(--accent-tint); }
 .qn-table td input.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -514,7 +610,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 .qn-table tr:first-child td input { font-weight: 600; }
 .table-controls { display: flex; gap: 4px; padding: 6px 2px 2px; }
 .table-ctl {
-  font-size: 11px; font-weight: 600; color: var(--ink-3); padding: 3px 9px;
+  font-size: 0.6875rem; font-weight: 600; color: var(--ink-3); padding: 3px 9px;
   border-radius: 6px; display: flex; align-items: center; gap: 3px;
 }
 .table-ctl:hover { background: var(--accent-tint); color: var(--accent); }
@@ -527,8 +623,8 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 3px 8px rgba(33, 147, 176, 0.3);
 }
-.doc-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
-.doc-preview { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; max-height: 30px; overflow: hidden; line-height: 1.3; }
+.doc-title { font-size: 0.84375rem; font-weight: 600; letter-spacing: -0.01em; }
+.doc-preview { font-size: 0.71875rem; color: var(--ink-3); margin-top: 2px; max-height: 30px; overflow: hidden; line-height: 1.3; }
 
 /* Document writing view (modal) */
 .doc-editor { width: 780px; max-width: 94vw; height: 82vh; display: flex; flex-direction: column; }
@@ -536,14 +632,14 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   display: flex; align-items: center; gap: 12px; padding: 18px 34px 10px;
 }
 .doc-editor-title {
-  flex: 1; border: none; outline: none; font-size: 26px; font-weight: 700;
+  flex: 1; border: none; outline: none; font-size: 1.625rem; font-weight: 700;
   letter-spacing: -0.025em; background: none;
 }
 .doc-editor-body { flex: 1; overflow-y: auto; padding: 6px 34px 40px; }
-.doc-editor-body .ProseMirror { outline: none; font-size: 15.5px; line-height: 1.7; min-height: 100%; }
+.doc-editor-body .ProseMirror { outline: none; font-size: 0.96875rem; line-height: 1.7; min-height: 100%; }
 .doc-editor-body .ProseMirror p { margin: 0 0 10px; }
-.doc-editor-body .ProseMirror h1 { font-size: 24px; letter-spacing: -0.02em; }
-.doc-editor-body .ProseMirror h2 { font-size: 19px; }
+.doc-editor-body .ProseMirror h1 { font-size: 1.5rem; letter-spacing: -0.02em; }
+.doc-editor-body .ProseMirror h2 { font-size: 1.1875rem; }
 .doc-editor-body .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder); color: var(--ink-3); float: left; height: 0; pointer-events: none;
 }
@@ -551,71 +647,104 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 /* ============ Comment thread ============ */
 .comment-card { width: 264px; padding: 12px 14px; background: var(--comment-bg); border-radius: var(--r-card); }
 .comment-card .thread-title {
-  font-size: 10.5px; font-weight: 700; color: var(--comment-title); margin-bottom: 6px;
+  font-size: 0.65625rem; font-weight: 700; color: var(--comment-title); margin-bottom: 6px;
   letter-spacing: 0.08em; display: flex; align-items: center; gap: 5px;
 }
-.comment-msg { font-size: 13px; padding: 7px 0; border-top: 1px solid var(--comment-border); line-height: 1.45; }
-.comment-msg .author { font-weight: 700; font-size: 11px; color: var(--comment-author); margin-bottom: 1px; }
+.comment-msg { font-size: 0.8125rem; padding: 7px 0; border-top: 1px solid var(--comment-border); line-height: 1.45; }
+.comment-msg .author { font-weight: 700; font-size: 0.6875rem; color: var(--comment-author); margin-bottom: 1px; }
 .comment-input {
   width: 100%; border: 1px solid var(--comment-border); border-radius: 8px; padding: 7px 10px;
-  font-size: 12.5px; margin-top: 8px; outline: none; background: var(--comment-input-bg); color: var(--ink);
+  font-size: 0.78125rem; margin-top: 8px; outline: none; background: var(--comment-input-bg); color: var(--ink);
 }
 .comment-input:focus { border-color: var(--accent); }
 .reaction-chip {
-  font-size: 11px; padding: 2px 8px; border-radius: var(--r-pill);
+  font-size: 0.6875rem; padding: 2px 8px; border-radius: var(--r-pill);
   border: 1px solid transparent; color: var(--ink-2);
 }
 .reaction-chip.on { background: var(--accent-tint); border-color: rgba(var(--accent-rgb), 0.25); color: var(--accent); }
 .reaction-chip:hover { border-color: var(--hairline-strong); }
 
 .clone-footer {
-  font-size: 10.5px; font-weight: 600; color: var(--accent); padding: 5px 15px 9px;
+  font-size: 0.65625rem; font-weight: 600; color: var(--accent); padding: 5px 15px 9px;
   display: flex; align-items: center; gap: 5px;
 }
 
 /* ============ Side panels ============ */
 .side-panel {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 336px;
+  position: absolute; top: 0; inset-inline-end: 0; bottom: 0; width: 336px;
   background: var(--glass);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border-left: 1px solid var(--hairline);
+  border-inline-start: 1px solid var(--hairline);
   box-shadow: -12px 0 40px rgba(0,0,0,0.08);
   z-index: 35; display: flex; flex-direction: column;
 }
+[dir="rtl"] .side-panel { box-shadow: 12px 0 40px rgba(0,0,0,0.08); }
+/* The Boards drawer is the one panel that comes from the other edge. It used
+   to say so in an inline style with physical left/right, which no amount of
+   `dir` on the root could mirror. */
+.side-panel.start {
+  inset-inline-start: 0; inset-inline-end: auto;
+  border-inline-start: none; border-inline-end: 1px solid var(--hairline);
+  box-shadow: 12px 0 40px rgba(0,0,0,0.08);
+}
+[dir="rtl"] .side-panel.start { box-shadow: -12px 0 40px rgba(0,0,0,0.08); }
 .side-panel .panel-head {
   padding: 15px 18px; display: flex; align-items: center; justify-content: space-between;
   border-bottom: 1px solid var(--hairline);
 }
 .side-panel .panel-head h3 {
-  margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+  margin: 0; font-size: 0.9375rem; font-weight: 700; letter-spacing: -0.01em;
   display: flex; align-items: center; gap: 8px;
 }
 .panel-close { color: var(--ink-3); width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
 .panel-close:hover { background: var(--hover); color: var(--ink); }
 .side-panel .panel-body { flex: 1; overflow-y: auto; padding: 14px 18px; }
-.panel-empty { color: var(--ink-3); font-size: 13px; text-align: center; padding-top: 44px; line-height: 1.6; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.panel-section-label { font-size: 11px; font-weight: 700; color: var(--ink-3); letter-spacing: 0.07em; margin: 14px 0 8px; }
+.panel-empty { color: var(--ink-3); font-size: 0.8125rem; text-align: center; padding-top: 44px; line-height: 1.6; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.panel-section-label { font-size: 0.6875rem; font-weight: 700; color: var(--ink-3); letter-spacing: 0.07em; margin: 14px 0 8px; }
 .panel-item {
   border: 1px solid var(--hairline); border-radius: 11px; padding: 11px 13px; margin-bottom: 9px;
-  font-size: 13px; background: var(--surface); line-height: 1.4;
+  font-size: 0.8125rem; background: var(--surface); line-height: 1.4;
   box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
-.panel-item .pi-meta { font-size: 11px; color: var(--ink-3); margin: 4px 0 9px; }
+.panel-item .pi-meta { font-size: 0.6875rem; color: var(--ink-3); margin: 4px 0 9px; }
 .panel-item .pi-actions { display: flex; gap: 6px; }
 .pi-btn {
-  font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: var(--r-pill);
+  font-size: 0.75rem; font-weight: 600; padding: 5px 12px; border-radius: var(--r-pill);
   background: var(--accent-tint); color: var(--accent);
   display: inline-flex; align-items: center; gap: 5px;
   transition: all 0.15s var(--ease);
 }
 .pi-btn:hover { background: var(--accent); color: #fff; }
-.pi-btn.danger { background: var(--danger-tint); color: var(--danger); }
+.pi-btn.danger { background: var(--danger-tint); color: var(--danger-text); }
 .pi-btn.danger:hover { background: var(--danger); color: #fff; }
 .pi-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+/* JN21/JN18 — the trash panel says what it has left, and says it in words.
+   The amber is ambient: `.pi-deadline` always carries the sentence, because a
+   colour on its own is exactly the 1.4.1 failure AX17 is about, and this is the
+   surface where being wrong is permanent. */
+.panel-subhead {
+  padding: 0 18px 10px; font-size: 0.75rem; color: var(--ink-3); line-height: 1.5;
+  border-bottom: 1px solid var(--hairline);
+}
+.panel-filter { padding: 12px 18px 0; }
+.panel-filter input {
+  width: 100%; border: 1px solid var(--hairline-strong); border-radius: 9px;
+  padding: 7px 11px; font-size: 0.8125rem; background: var(--surface); outline: none;
+}
+.panel-item .pi-title { font-weight: 600; }
+.panel-item .pi-deadline { font-size: 0.6875rem; font-weight: 600; margin-bottom: 8px; color: var(--ink-2); }
+.panel-item .pi-deadline.d-soon,
+.panel-item .pi-deadline.d-critical { color: var(--warn-text); }
+.panel-item.d-soon, .panel-item.d-critical { border-color: var(--warn); }
+.panel-item .pi-note { font-size: 0.6875rem; color: var(--ink-3); margin-bottom: 8px; }
+.trash-members { margin-top: 10px; padding-inline-start: 12px; border-inline-start: 2px solid var(--hairline); }
+.panel-item.trash-member { margin-bottom: 6px; padding: 7px 10px; box-shadow: none; background: var(--canvas); }
+.panel-item.trash-member .pi-meta { margin: 2px 0 0; }
 .quick-capture {
   width: 100%; border: 1px solid var(--hairline-strong); border-radius: 10px; padding: 10px 13px;
-  font-size: 13px; outline: none; margin-bottom: 14px; background: var(--surface);
+  font-size: 0.8125rem; outline: none; margin-bottom: 14px; background: var(--surface);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .quick-capture:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
@@ -637,45 +766,64 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 @keyframes popIn { from { opacity: 0; transform: scale(0.97) translateY(6px); } }
 .modal .modal-head { padding: 18px 22px 10px; display: flex; justify-content: space-between; align-items: center; }
-.modal .modal-head h3 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -0.015em; }
+.modal .modal-head h3 { margin: 0; font-size: 1.03125rem; font-weight: 700; letter-spacing: -0.015em; }
 .modal .modal-body { padding: 0 22px 22px; overflow-y: auto; }
 .search-input {
-  width: 100%; font-size: 15px; padding: 11px 14px; border: 1.5px solid var(--hairline-strong);
+  width: 100%; font-size: 0.9375rem; padding: 11px 14px; border: 1.5px solid var(--hairline-strong);
   border-radius: 11px; outline: none; background: var(--surface-2);
   transition: all 0.15s var(--ease);
 }
 .search-input:focus { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 4px var(--accent-tint); }
+/* A real <button> now (AX23), so it needs the button reset: full width, start
+   aligned, inherited colour. The AX15 note applies to `.sr-type` too — it was
+   #9a97a5 hard-coded at about 3.1:1. */
 .search-result {
   padding: 10px 12px; border-radius: 9px; cursor: pointer; display: flex;
-  gap: 11px; align-items: center; font-size: 13.5px;
+  gap: 11px; align-items: center; font-size: 0.84375rem;
   transition: background 0.12s;
+  width: 100%; text-align: start; color: var(--ink); background: none; border: none;
 }
+.search-note { color: var(--ink-3); font-size: 0.8125rem; padding: 8px; }
 .search-result:hover { background: var(--accent-tint); }
 .search-result .sr-icon { color: var(--ink-3); display: flex; flex-shrink: 0; }
 .search-result:hover .sr-icon { color: var(--accent); }
-.search-result .sr-type { font-size: 11px; color: var(--ink-3); width: 74px; flex-shrink: 0; text-align: right; }
+.search-result .sr-type { font-size: 0.6875rem; color: var(--ink-3); width: 74px; flex-shrink: 0; text-align: end; }
 .share-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .share-row input {
   flex: 1; padding: 9px 12px; border: 1px solid var(--hairline-strong); border-radius: 9px;
-  font-size: 13px; outline: none;
+  font-size: 0.8125rem; outline: none;
 }
 .share-row input:focus { border-color: var(--accent); }
 .share-section { margin-bottom: 22px; }
 .share-section h4 {
-  margin: 0 0 9px; font-size: 11.5px; font-weight: 700; color: var(--ink-3);
+  margin: 0 0 9px; font-size: 0.71875rem; font-weight: 700; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .share-link-box {
   background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 9px;
-  padding: 9px 11px; font-size: 12px;
+  padding: 9px 11px; font-size: 0.75rem;
   font-family: 'SF Mono', ui-monospace, Consolas, monospace; word-break: break-all; margin-bottom: 8px;
   color: var(--ink-2);
 }
-.editor-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; font-size: 13px; }
+.editor-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; font-size: 0.8125rem; gap: 10px; }
+/* JN14. These two lines replace `fontFamily: Consolas` on a raw Keycloak sub. */
+.editor-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-you { color: var(--ink-3); font-style: normal; }
+.share-error { color: var(--danger-text); font-size: 0.8125rem; margin-bottom: 10px; }
+.share-note { font-size: 0.75rem; color: var(--ink-3); margin-top: 4px; }
+/* JN13's honest dead-end replacement: a fact, a next step, and something
+   sendable — with the bearer-token caveat stated rather than implied. */
+.share-noaccount {
+  border: 1px solid var(--hairline-strong); border-radius: 10px;
+  padding: 10px 12px; margin: 8px 0; font-size: 0.8125rem; line-height: 1.5;
+  background: var(--surface-2);
+}
+.share-noaccount p { margin: 6px 0 8px; color: var(--ink-2); }
+.share-noaccount .share-caveat { color: var(--warn-text); font-size: 0.75rem; margin: 8px 0 0; }
 
 /* ============ Zoom cluster ============ */
 .zoom-cluster {
-  position: absolute; bottom: 16px; right: 16px;
+  position: absolute; bottom: 16px; inset-inline-end: 16px;
   background: var(--glass);
   backdrop-filter: blur(20px) saturate(180%);
   border-radius: 11px; box-shadow: var(--shadow-2);
@@ -687,13 +835,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .zoom-cluster button:hover { background: var(--hover); color: var(--ink); }
 .zoom-value {
-  font-size: 12px; font-weight: 600; color: var(--ink-2); min-width: 48px; text-align: center;
+  font-size: 0.75rem; font-weight: 600; color: var(--ink-2); min-width: 48px; text-align: center;
   font-variant-numeric: tabular-nums; user-select: none;
 }
 .hint-pill {
   position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--glass); backdrop-filter: blur(20px);
-  color: var(--ink-3); font-size: 12.5px;
+  color: var(--ink-3); font-size: 0.78125rem;
   border-radius: var(--r-pill); padding: 8px 18px; z-index: 20; user-select: none; pointer-events: none;
   box-shadow: var(--shadow-1);
 }
@@ -707,12 +855,12 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   width: 74px; height: 74px; border-radius: 20px;
   background: linear-gradient(135deg, #6e6cf0, #4a48c4);
   color: #fff; display: flex; align-items: center; justify-content: center;
-  font-family: Georgia, serif; font-size: 42px; font-weight: 700;
+  font-family: Georgia, serif; font-size: 2.625rem; font-weight: 700;
   box-shadow: 0 14px 40px rgba(94, 92, 230, 0.4);
 }
-.boot-title { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
+.boot-title { font-size: 1.3125rem; font-weight: 700; letter-spacing: -0.02em; }
 .boot-title em { font-style: normal; color: var(--accent); }
-.boot-sub { font-size: 13px; color: var(--ink-3); }
+.boot-sub { font-size: 0.8125rem; color: var(--ink-3); }
 .spinner {
   width: 24px; height: 24px; border: 2.5px solid var(--hover-strong);
   border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
@@ -720,7 +868,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .line-label {
-  font-size: 11px; font-weight: 600; fill: var(--ink-2); text-anchor: middle;
+  font-size: 0.6875rem; font-weight: 600; fill: var(--ink-2); text-anchor: middle;
   paint-order: stroke; stroke: var(--canvas); stroke-width: 3.5px;
 }
 
@@ -730,9 +878,9 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   backdrop-filter: blur(24px) saturate(180%); border-bottom: 1px solid var(--hairline);
   display: flex; align-items: center; gap: 14px; padding: 0 16px; flex-shrink: 0; z-index: 40;
 }
-.public-welcome { flex: 1; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-welcome { flex: 1; font-size: 0.8125rem; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .public-tag {
-  font-size: 11px; font-weight: 700; color: var(--ink-3); text-transform: uppercase;
+  font-size: 0.6875rem; font-weight: 700; color: var(--ink-3); text-transform: uppercase;
   letter-spacing: 0.06em; border: 1px solid var(--hairline-strong); border-radius: var(--r-pill); padding: 3px 10px;
 }
 
@@ -743,14 +891,22 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   border-radius: 11px; box-shadow: var(--shadow-pop); padding: 5px;
   animation: popIn 0.12s var(--ease);
+  /* A menu taller than the screen had no scroll and no upper clamp, so in
+     landscape its first rows were simply drawn off the top with no way to
+     reach them. `dvh` rather than `vh` because the mobile URL bar moves.
+     `overscroll-behavior` stops a flick inside the menu panning the canvas
+     behind it once MO1 gives the canvas gestures at all. */
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .ctx-item {
   width: 100%; display: flex; align-items: center; gap: 10px;
-  padding: 8px 11px; border-radius: 7px; font-size: 13px; color: var(--ink);
-  text-align: left;
+  padding: 8px 11px; border-radius: 7px; font-size: 0.8125rem; color: var(--ink);
+  text-align: start;
 }
 .ctx-item:hover { background: var(--accent-tint); color: var(--accent); }
-.ctx-item.danger:hover { background: var(--danger-tint); color: var(--danger); }
+.ctx-item.danger:hover { background: var(--danger-tint); color: var(--danger-text); }
 .ctx-item:disabled { opacity: 0.4; pointer-events: none; }
 .ctx-icon { display: flex; color: var(--ink-3); }
 .ctx-item:hover .ctx-icon { color: inherit; }
@@ -762,14 +918,17 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: center;
   pointer-events: none;
 }
+/* Two live regions, one visual stack (AX22): politeness cannot vary within a
+   single aria-live container, so the errors get their own. */
+.toast-group { display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast {
   display: flex; align-items: center; gap: 9px; pointer-events: auto;
-  background: var(--overlay-bg); color: #fff; font-size: 13px; font-weight: 500;
+  background: var(--overlay-bg); color: #fff; font-size: 0.8125rem; font-weight: 500;
   border-radius: 11px; padding: 10px 12px 10px 14px; box-shadow: var(--shadow-pop);
   max-width: 400px; animation: toastIn 0.24s var(--ease);
 }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } }
-.toast-success .toast-icon { color: var(--ok); display: flex; }
+.toast-success .toast-icon { color: var(--ok-text); display: flex; }
 .toast-error .toast-icon { color: #ff6b6b; display: flex; }
 .toast-icon { display: flex; }
 .toast-msg { flex: 1; }
@@ -779,7 +938,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 /* ---- label chips + popover ---- */
 .label-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 10px 0; }
 .label-chip {
-  font-size: 10.5px; font-weight: 600; color: #fff; border-radius: var(--r-pill);
+  font-size: 0.65625rem; font-weight: 600; color: #fff; border-radius: var(--r-pill);
   padding: 2px 9px; letter-spacing: 0.01em;
 }
 .label-popover {
@@ -789,13 +948,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 }
 .label-new-input {
   width: 100%; border: 1px solid var(--hairline-strong); border-radius: 8px;
-  padding: 8px 10px; font-size: 13px; outline: none; margin-bottom: 8px;
+  padding: 8px 10px; font-size: 0.8125rem; outline: none; margin-bottom: 8px;
 }
 .label-new-input:focus { border-color: var(--accent); }
 .label-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .label-row {
   display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 7px;
-  font-size: 13px; color: var(--ink); text-align: left; width: 100%;
+  font-size: 0.8125rem; color: var(--ink); text-align: start; width: 100%;
 }
 .label-row:hover { background: var(--surface-2); }
 .label-row .label-name { flex: 1; }
@@ -804,34 +963,42 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
 
 /* ---- notifications ---- */
 .notif-badge {
-  position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px;
-  background: var(--danger); color: #fff; font-size: 10px; font-weight: 700;
+  position: absolute; top: 1px; inset-inline-end: 1px; min-width: 16px; height: 16px;
+  background: var(--danger); color: #fff; font-size: 0.625rem; font-weight: 700;
   border-radius: var(--r-pill); display: flex; align-items: center; justify-content: center;
   padding: 0 4px; border: 1.5px solid var(--surface);
 }
 .notif-dropdown {
-  position: absolute; top: 40px; right: 0; width: 320px; max-height: 420px;
+  position: absolute; top: 40px; inset-inline-end: 0; width: 320px; max-height: 420px;
   background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-pop);
   z-index: 120; display: flex; flex-direction: column; overflow: hidden;
   animation: popIn 0.14s var(--ease);
 }
 .notif-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; border-bottom: 1px solid var(--hairline); font-weight: 700; font-size: 14px;
+  padding: 12px 14px; border-bottom: 1px solid var(--hairline); font-weight: 700; font-size: 0.875rem;
 }
 .notif-body { overflow-y: auto; }
 .notif-item {
-  width: 100%; text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--hairline);
+  width: 100%; text-align: start; padding: 11px 14px; border-bottom: 1px solid var(--hairline);
   display: flex; flex-direction: column; gap: 3px;
 }
 .notif-item:hover { background: var(--surface-2); }
-.notif-msg { font-size: 13px; color: var(--ink); line-height: 1.4; }
-.notif-time { font-size: 11px; color: var(--ink-3); }
+/* JN11. Now that reading follows the row rather than the panel, "unread" has
+   to be visible on the row — the badge alone told you a number and not which
+   ones. The bar is the ambient half; `.sr-only` inside the row carries the
+   same fact in words, because a 3px accent stripe is not a signal to anyone
+   who cannot see 3px of accent. */
+.notif-item.unread { border-inline-start: 3px solid var(--accent); background: var(--accent-tint); }
+.notif-head { gap: 8px; }
+.notif-head > span { flex: 1; min-width: 0; }
+.notif-msg { font-size: 0.8125rem; color: var(--ink); line-height: 1.4; }
+.notif-time { font-size: 0.6875rem; color: var(--ink-3); }
 
 /* ---- boards drawer ---- */
 .drawer-home {
   display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px;
-  border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--ink); margin-bottom: 6px;
+  border-radius: 9px; font-size: 0.84375rem; font-weight: 600; color: var(--ink); margin-bottom: 6px;
 }
 .drawer-home:hover { background: var(--accent-tint); color: var(--accent); }
 .drawer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
@@ -845,7 +1012,20 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   width: 50px; height: 50px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
   color: #fff; box-shadow: 0 3px 8px rgba(0,0,0,0.12);
 }
-.drawer-board-title { font-size: 12px; font-weight: 600; text-align: center; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.drawer-board-title { font-size: 0.75rem; font-weight: 600; text-align: center; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* JN17. The archive control is a real sibling button, always in the tab order,
+   never a hover reveal — an action you can only reach by putting a pointer on
+   a tile is an action a keyboard user does not have. */
+.drawer-board-wrap { display: flex; flex-direction: column; gap: 4px; }
+.drawer-board-wrap .drawer-board { flex: 1; }
+.drawer-archive {
+  font-size: 0.6875rem; font-weight: 600; color: var(--ink-3);
+  padding: 4px 6px; border-radius: 7px; align-self: stretch; text-align: center;
+}
+.drawer-archive:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.drawer-archive:disabled { opacity: 0.45; pointer-events: none; }
+.drawer-archived-toggle { display: block; width: 100%; text-align: start; cursor: pointer; }
+.drawer-none { font-size: 0.78125rem; color: var(--ink-3); }
 
 /* ---- template picker ---- */
 .template-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 6px; }
@@ -857,13 +1037,340 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); }
   width: 56px; height: 56px; border-radius: 14px; background: var(--accent-tint); color: var(--accent);
   display: flex; align-items: center; justify-content: center;
 }
-.template-title { font-size: 13px; font-weight: 600; }
+.template-title { font-size: 0.8125rem; font-weight: 600; }
 
 /* ---- password gate ---- */
 .gate-card {
   background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-pop);
   padding: 24px; width: 340px; display: flex; flex-direction: column; gap: 12px;
 }
-.gate-title { font-size: 15px; font-weight: 600; text-align: center; letter-spacing: -0.01em; }
-.gate-error { color: var(--danger); font-size: 12.5px; text-align: center; }
+.gate-title { font-size: 0.9375rem; font-weight: 600; text-align: center; letter-spacing: -0.01em; }
+.gate-error { color: var(--danger-text); font-size: 0.78125rem; text-align: center; }
 .gate-submit { justify-content: center; height: 38px; }
+
+/* ============================================================
+   Reach — the layer that was missing.
+
+   Before this block the whole frontend contained two aria attributes, zero
+   tabIndex, and four media queries of which three belonged to the agent bar.
+   What follows is not a redesign: it is the small set of rules that make the
+   controls already on screen reachable by a keyboard, by a finger, and at a
+   width the product actually installs to.
+   ============================================================ */
+
+/* The two skip links, which shipped as MARKUP AND STRINGS WITH NO STYLE AT ALL.
+   `.skip-link` matched nothing in any stylesheet, so both links rendered as
+   ordinary blue anchors stacked over the top-left of the app — the first thing
+   anyone saw, on every load. A skip link is supposed to be the opposite: absent
+   until a keyboard reaches it, and then unmissable.
+
+   Hidden the same way .sr-only hides, rather than with display:none or
+   visibility:hidden, because both of those take the link out of the focus order
+   — which would leave it invisible AND unreachable, i.e. no skip link at all.
+   On focus it drops into the corner as a real button. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  inset-inline-start: 0;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  z-index: 200;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  width: auto; height: auto;
+  margin: 8px;
+  padding: 10px 16px;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font-size: .85rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Visible to a screen reader, invisible on screen. Did not exist, which is
+   why every glyph-only control had to either announce as an unpronounceable
+   symbol or announce as nothing. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* CV9 — a "goes to" arrow is a direction, and the chrome now has two of them.
+   Flipping the glyph rather than swapping it keeps one string in the source and
+   no second character to forget. `aria-hidden` is already on every use: the
+   destination is named in the text beside it, so nothing is lost by not
+   announcing a shape. */
+.dir-arrow { display: inline-block; }
+[dir="rtl"] .dir-arrow { transform: scaleX(-1); }
+
+/* The card shell became focusable so Enter could arrive somewhere; without a
+   ring that is a cursor nobody can see. */
+.el:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.ghost-el:focus-visible,
+.ghost-child:focus-visible,
+.ghost-count:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- what the agent is told to leave alone ---------------------------- */
+.el-private {
+  position: absolute; top: -20px; left: 0;
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--ink-2); background: var(--surface-2);
+  border: 1px solid var(--hairline); border-radius: var(--r-pill);
+  padding: 1px 7px; white-space: nowrap; z-index: 6;
+}
+.el.agent-excluded { box-shadow: 0 0 0 1px var(--hairline-strong); }
+
+/* The tray had no proposal awareness at all, and "file my tray" is the single
+   most common request the agent gets. */
+.panel-item.agent-proposed { opacity: 0.45; }
+
+/* ---- MO3: what the agent bar is standing on --------------------------
+   Zero on a desktop, where the bar is a centred pill and this corner is free;
+   set by the agent bar's own width query, which is where the collision lives.
+   Declared here because the consumer is here and a var with no fallback that
+   nobody defines is how this kind of fix rots. */
+:root { --agent-bar-reserve: 0px; }
+.zoom-cluster { bottom: calc(16px + var(--agent-bar-reserve)); }
+
+/* ---- AX26: hit areas, without changing what is drawn -----------------
+   The distribution was the tell: the SMALLEST targets were the highest-stakes
+   — 18px to drop an agent action or undo one, 14px to resize, 15px to draw a
+   connector — because they were sized for a cursor's single-pixel hotspot.
+   WCAG 2.5.8 asks 24; both platform HIGs ask 44. ::before expands the touch
+   area without moving a pixel of the design. */
+@media (pointer: coarse) {
+  .ap-row-x::before,
+  .ghost-chip-x::before,
+  .task-check::before,
+  .el .resize-handle::before,
+  .connect-anchor::before {
+    content: '';
+    position: absolute;
+    inset: -13px;
+  }
+  .task-check { position: relative; }
+  .el .resize-handle, .connect-anchor { position: absolute; }
+
+  .el-actions button,
+  .zoom-cluster button,
+  .topbar-btn.icon-only,
+  .panel-close,
+  .task-date-btn,
+  .task-del { min-width: 44px; min-height: 44px; }
+
+  /* A control that only appears on hover does not appear at all here. */
+  .ap-row-x, .ghost-chip-x { opacity: 1; }
+  .task-row .task-del { color: var(--ink-3); }
+  .el .resize-handle, .connect-anchor { opacity: 1; }
+
+  /* The action bar sits 42px above the card, so a card near the top of a phone
+     viewport had its Duplicate and Delete drawn off-screen entirely. */
+  .el-actions { top: auto; bottom: -46px; }
+}
+
+/* ---- AX25: reflow ----------------------------------------------------
+   WCAG 1.4.10. On a 375px phone the permanent rail took 20% of the width, and
+   opening the Unsorted tray — the capture inbox, the thing a phone is FOR —
+   left 39px of canvas. Three structural rules, not a redesign; the canvas
+   layer keeps its physical coordinates. */
+@media (max-width: 640px) {
+  /* The rail becomes a bottom bar, which also puts the trash drop-target in
+     thumb reach rather than at the far top-left corner. */
+  .workspace { flex-direction: column-reverse; }
+  .rail {
+    width: 100%;
+    flex-direction: row;
+    border-inline-end: none;
+    border-top: 1px solid var(--hairline);
+    padding: 6px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  .rail-spacer { display: none; }
+  .rail-btn { width: auto; min-width: 56px; padding: 6px 8px; }
+  .flyout { left: 10px; right: 10px; bottom: calc(100% + 8px); }
+
+  .side-panel { width: min(336px, 100%); }
+
+  /* Full-bleed sheets: a 540px modal on a 375px screen was a dialog with its
+     own horizontal scrollbar. */
+  .modal-backdrop { padding-top: 0; align-items: flex-end; }
+  .modal {
+    width: 100%; max-width: 100%;
+    max-height: 88dvh;
+    border-radius: 16px 16px 0 0;
+  }
+}
+
+/* ---- AX25: the 320 × 256 floor ---------------------------------------
+   WCAG 1.4.10 states the reflow target exactly — 320 CSS px wide, which is also
+   what 400% zoom on a 1280px display produces, and 256 CSS px tall. At that
+   size the topbar's fixed row put the breadcrumb, the title and four buttons on
+   one line and pushed half of them past the right edge, where `body { overflow:
+   hidden }` made them unreachable rather than merely off-screen. The rules
+   below are about the CHROME only; the canvas layer keeps physical coordinates
+   and pans, which is how a person reaches what is outside it. */
+@media (max-width: 400px) {
+  .topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-block: 4px;
+  }
+  /* Its own line, and scrollable in its own box — a deep board's path is
+     genuinely wider than 320px and truncating it loses the only way back up. */
+  .breadcrumbs { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .side-panel { width: 100%; max-width: 100%; }
+  .modal { border-radius: 0; }
+  .flyout { left: 4px; right: 4px; }
+}
+
+/* 256px tall is a landscape phone with the keyboard up. A dialog taller than
+   the viewport must scroll inside itself; clipped, its confirm button is
+   simply not there. */
+@media (max-height: 420px) {
+  .modal { max-height: 100dvh; overflow-y: auto; border-radius: 0; }
+  .modal-backdrop { padding-top: 0; }
+  .side-panel { overflow-y: auto; }
+}
+
+/* A submenu that opens on hover does not exist on a device with no hover, so
+   on a coarse pointer the group renders inline and indented instead. That
+   submenu is the ONLY nested item in the product and it is Text direction —
+   the control that decides whether numbers in an Arabic card render as ٥ or 5. */
+.ctx-inline-group {
+  padding-inline-start: 14px;
+  border-inline-start: 1px solid var(--hairline);
+  margin-inline-start: 12px;
+}
+.ctx-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* ---- AX16, WCAG 1.4.11 -----------------------------------------------
+   Exactly one `:focus-visible` rule existed in all four stylesheets, and the
+   colour it drew was `--accent` — which is (a) 2.75:1 on the dark surface and
+   3.36:1 on the dark canvas, below the 3:1 floor a focus indicator has to
+   clear, and (b) USER-SELECTABLE from nine swatches with no floor at all, so
+   picking the amber made the ring invisible. Three fields then suppressed the
+   outline outright with a bare `outline: none` and no replacement: the
+   plan-row retitle field, the ghost title field and the steer field — a
+   keyboard user editing a staged action could not see that they were in it.
+
+   So the ring is its OWN token, verified >= 3:1 against --surface, --surface-2
+   and --canvas in both themes (contract.test.ts asserts this), and the accent
+   keeps its job as identity. The user's colour choice and a WCAG floor are now
+   two different decisions, which is the only arrangement in which both can be
+   honoured.
+
+   Last rule in the file on purpose: several base input rules in this stylesheet
+   still carry `outline: none` at equal specificity, and the cascade is what
+   makes this one win over them. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- AX30 · the accessibility channels ------------------------------------
+   Four root attributes stamped by settingsStore.applySideEffects, resolved
+   OS-signal-then-explicit-override exactly as `theme` already is. The plumbing
+   is the same plumbing dot grids use; the only thing that was missing was
+   anybody deciding these were settings.
+   ========================================================================= */
+
+/* Text size. A multiplier ON TOP of the browser's own root size (AX25), not a
+   replacement for it — someone who has already set their browser to 20px and
+   then asks for 130% here means 26px, not 130% of our guess. */
+:root[data-textscale="115"] { --type-scale: 1.15; }
+:root[data-textscale="130"] { --type-scale: 1.3; }
+:root[data-textscale="150"] { --type-scale: 1.5; }
+:root[data-density="compact"][data-textscale="115"] { --type-scale: 1.07; }
+:root[data-density="compact"][data-textscale="130"] { --type-scale: 1.21; }
+:root[data-density="compact"][data-textscale="150"] { --type-scale: 1.4; }
+
+/* Increased contrast: the hairlines this product draws everything with are
+   rgba at 0.12, which is a boundary a low-vision user cannot see at all. */
+:root[data-contrast="more"] {
+  --hairline: rgba(60, 60, 67, 0.42);
+  --hairline-strong: rgba(60, 60, 67, 0.62);
+  --ink-2: #35353a;
+  --ink-3: #4c4c51;
+  --ink-4: #4c4c51;
+  --glass: var(--surface);
+}
+:root[data-theme="dark"][data-contrast="more"] {
+  --hairline: rgba(255, 255, 255, 0.38);
+  --hairline-strong: rgba(255, 255, 255, 0.6);
+  --ink-2: #e4e4e9;
+  --ink-3: #c8c8cd;
+  --ink-4: #c8c8cd;
+  --glass: var(--surface);
+}
+
+/* Reduced transparency. `backdrop-filter: blur(24px) saturate(180%)` behind
+   text is a direct hit for prefers-reduced-transparency, and the topbar, the
+   rail, the modal backdrop, the agent bar and every popover use it. */
+:root[data-transparency="reduced"] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-transparency="reduced"] { --glass: var(--surface); }
+
+/* ---- AX19 · reduced motion, the half CSS can reach ------------------------
+   global.css had NO prefers-reduced-motion block at all — the two that existed
+   were both in the agent stylesheets — so fadeIn, popIn, toastIn and spin ran
+   unguarded for everyone. The JS half (nine GSAP timelines, including the
+   0.55s pan-and-zoom fired on every plan arrival) is in lib/motion.ts, which
+   is the only entry point allowed to start a tween.
+
+   Keyed off the attribute AND the media query: the attribute is the resolved
+   answer once settings hydrate, and the query covers the boot window before
+   /me returns — which is exactly when the first fade runs. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* The spinner is the one exception: it carries "still working" and a frozen
+     spinner says the opposite. Slowed, not stopped. */
+  :root:not([data-motion="full"]) .spinner { animation-duration: 2.4s !important; }
+}
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="reduced"] .spinner { animation-duration: 2.4s !important; }
